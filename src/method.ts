@@ -67,8 +67,6 @@ export function nextLessonRange(page: number, from: number, lineCount: number, v
 export interface StepOptions {
   /** Учить урок одним куском, без нарезки по 2 строки (объём «полстраницы» и «страница»). */
   oneChunk?: boolean;
-  /** Выученная соседняя страница, с которой соединить урок-страницу. */
-  joinPage?: number;
 }
 
 /** Шаги урока по методике. `lineCount` — число строк на странице урока. */
@@ -109,16 +107,11 @@ export function buildSteps(range: LineRange, lineCount: number, m: Method, prev?
     const from = pageDone ? 0 : prev!.from;
     steps.push({ kind: "join", range: { page, from, to: range.to }, hidden: true, reps: m.join, chunk: chunks.length + 1 });
   }
-  // Урок-страница соединяется с выученной соседней страницей: вчера стр. 4, сегодня 5, в конце читает 4 и 5.
-  const fullPage = range.from === 0 && range.to >= lineCount;
-  if (m.join > 0 && fullPage && opts.joinPage) {
-    steps.push({ kind: "join", range, joinPage: opts.joinPage, hidden: true, reps: m.join, chunk: chunks.length + 1 });
-  }
   // Повторять урок наизусть, пока за урок не наберётся дневная норма (по умолчанию 200).
   const total = steps.reduce((n, st) => n + st.reps, 0);
   const last = steps[steps.length - 1];
   if (m.dailyTarget > total && last) {
-    const r = (last.kind === "join" && !last.joinPage) || last.kind === "whole" ? last.range : range;
+    const r = last.kind === "join" || last.kind === "whole" ? last.range : range;
     steps.push({ kind: "repeat", range: r, hidden: true, reps: m.dailyTarget - total, chunk: chunks.length + 2 });
   }
   return steps;

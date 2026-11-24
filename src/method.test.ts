@@ -182,17 +182,12 @@ describe("повторение до нормы", () => {
 });
 
 describe("урок одним куском (полстраницы и страница)", () => {
-  it("страница: читать 20, глядя 10, не глядя 10, наизусть 20, соединить со вчерашней, добрать до 200", () => {
-    const steps = buildSteps({ page: 5, from: 0, to: 15 }, 15, DEFAULT_METHOD, undefined, { oneChunk: true, joinPage: 4 });
-    expect(steps.map((s) => s.kind)).toEqual(["readFirst", "look", "blind", "heart", "join", "repeat"]);
-    expect(steps.slice(1, 4).every((s) => s.range.from === 0 && s.range.to === 15)).toBe(true);
-    expect(steps[4].joinPage).toBe(4);
-    expect(steps[5].range).toEqual({ page: 5, from: 0, to: 15 });
-    expect(steps.reduce((n, s) => n + s.reps, 0)).toBe(200);
-  });
-  it("первая страница без соединения", () => {
+  it("страница: читать 20, глядя 10, не глядя 10, наизусть 20, без соединения страниц, добрать до 200", () => {
     const steps = buildSteps({ page: 5, from: 0, to: 15 }, 15, DEFAULT_METHOD, undefined, { oneChunk: true });
     expect(steps.map((s) => s.kind)).toEqual(["readFirst", "look", "blind", "heart", "repeat"]);
+    expect(steps.slice(1, 4).every((s) => s.range.from === 0 && s.range.to === 15)).toBe(true);
+    expect(steps[4].range).toEqual({ page: 5, from: 0, to: 15 });
+    expect(steps[4].reps).toBe(140);
   });
   it("вторая половина страницы одним куском и соединение всей страницы", () => {
     const steps = buildSteps({ page: 5, from: 8, to: 15 }, 15, DEFAULT_METHOD, { page: 5, from: 0, to: 8 }, { oneChunk: true });

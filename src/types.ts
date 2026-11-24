@@ -57,8 +57,6 @@ export interface Step {
   reps: number;
   /** Номер куска (с 0), к которому относится шаг. */
   chunk: number;
-  /** Соединение страниц: вторая страница, которую читают вместе с range (целиком). */
-  joinPage?: number;
 }
 
 export interface LessonProgress {
