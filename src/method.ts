@@ -93,7 +93,7 @@ export function buildSteps(range: LineRange, lineCount: number, m: Method, prev?
     }
     if (i > 0 && m.join > 0) {
       const prev = chunks[i - 1];
-      steps.push({ kind: "join", range: { page, from: prev[0], to: b }, hidden: true, reps: m.join, chunk: i });
+      steps.push({ kind: "join", range: { page, from: prev[0], to: b }, hidden: false, reps: m.join, chunk: i });
     }
   });
 
@@ -105,7 +105,7 @@ export function buildSteps(range: LineRange, lineCount: number, m: Method, prev?
   const pageDone = range.to >= lineCount && range.from > 0;
   if (m.join > 0 && (pageDone || (prev && prev.page === page && prev.to === range.from && prev.from < range.from))) {
     const from = pageDone ? 0 : prev!.from;
-    steps.push({ kind: "join", range: { page, from, to: range.to }, hidden: true, reps: m.join, chunk: chunks.length + 1 });
+    steps.push({ kind: "join", range: { page, from, to: range.to }, hidden: false, reps: m.join, chunk: chunks.length + 1 });
   }
   // Повторять урок наизусть, пока за урок не наберётся дневная норма (по умолчанию 200).
   const total = steps.reduce((n, st) => n + st.reps, 0);

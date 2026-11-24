@@ -153,7 +153,7 @@ describe("соединение с прошлым уроком", () => {
     expect(last.kind).toBe("join");
     expect(last.range).toEqual({ page: 3, from: 0, to: 4 });
     expect(last.reps).toBe(M.join);
-    expect(last.hidden).toBe(true);
+    expect(last.hidden).toBe(false);
   });
   it("первый урок на странице без соединения", () => {
     const steps = buildSteps({ page: 3, from: 0, to: 2 }, 15, M);
