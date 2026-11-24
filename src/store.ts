@@ -26,6 +26,17 @@ function detectLang(): Lang {
   return (["ru", "kk", "en", "ar"] as Lang[]).includes(code as Lang) ? (code as Lang) : "ru";
 }
 
+/** Правки методики для учеников, сохранённых раньше. */
+function migrate(s: AppState): AppState {
+  if ((s.methodRev ?? 0) < 1) {
+    // Шаг «наизусть 20 раз» убран: выученное и так повторяется до нормы шагом «повторяй до нормы».
+    s.students.forEach((st) => {
+      if (st.method.heart === 20) st.method = { ...st.method, heart: 0 };
+    });
+  }
+  return { ...s, methodRev: 1 };
+}
+
 function load(): AppState {
   try {
     const raw = localStorage.getItem(KEY);
@@ -34,13 +45,13 @@ function load(): AppState {
       if (s.version === 1) {
         // Новые поля методики получают значения по умолчанию.
         s.students.forEach((st) => (st.method = { ...DEFAULT_METHOD, ...st.method }));
-        return s;
+        return migrate(s);
       }
     }
   } catch {
     /* пустое или повреждённое хранилище — начинаем заново */
   }
-  return { version: 1, lang: detectLang(), students: [], activeId: null };
+  return { version: 1, methodRev: 1, lang: detectLang(), students: [], activeId: null };
 }
 
 let state: AppState = load();
@@ -289,5 +300,5 @@ export function importJson(text: string) {
   const s = JSON.parse(text) as AppState;
   if (s.version !== 1 || !Array.isArray(s.students)) throw new Error("bad backup");
   s.students.forEach((st) => (st.method = { ...DEFAULT_METHOD, ...st.method }));
-  set(s);
+  set(migrate(s));
 }

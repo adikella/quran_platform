@@ -6,7 +6,7 @@ export const DEFAULT_METHOD: Method = {
   readFirst: 20,
   look: 10,
   blind: 10,
-  heart: 20,
+  heart: 0,
   heartSplit: false,
   join: 20,
   whole: 20,

@@ -121,6 +121,8 @@ export type Theme = "auto" | "light" | "dark";
 
 export interface AppState {
   version: 1;
+  /** Номер последней правки методики, применённой к сохранённым ученикам. */
+  methodRev?: number;
   lang: Lang;
   /** Оформление: как в системе или в Telegram (auto), светлое или тёмное. */
   theme?: Theme;
