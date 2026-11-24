@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { Counter } from "../components/Counter";
 import { PageView } from "../components/PageView";
-import { usePages, useSessionTimer, useSurahs, useT } from "../hooks";
+import { useMeta, usePages, useSessionTimer, useSurahs, useT } from "../hooks";
 import type { Key } from "../i18n";
-import { buildSteps } from "../method";
+import { BRIDGE_WORDS, buildSteps, previousLesson } from "../method";
 import { versesOfRange } from "../mushaf";
-import { abandonLesson, addRep, addTime, finishLesson, getDay, setLessonProgress } from "../store";
+import { abandonLesson, addRep, addTime, finishLesson, getDay, patchStudent, setLessonProgress } from "../store";
 import { haptic } from "../telegram";
 import type { Step, Student } from "../types";
 
@@ -22,9 +22,15 @@ export function stepLabel(step: Step, lineCount: number, t: (k: Key, v?: Record<
     case "heart":
       return step.hidden ? t("step_heart", { a, b }) : t("step_heartLook", { a, b });
     case "join":
+      if (step.joinPage) {
+        const [x, y] = [step.joinPage, step.range.page].sort((m, n) => m - n);
+        return t("step_joinPages", { a: x, b: y });
+      }
       return t("step_join", { a, b });
     case "whole":
       return t("step_whole");
+    case "repeat":
+      return t("step_repeat", { a, b });
   }
 }
 
@@ -39,15 +45,26 @@ export function LessonScreen({ student, onClose, onSubmitNow }: Props) {
   const t = useT();
   const surahs = useSurahs();
   const lesson = student.hifz.lesson;
-  const { data } = usePages(student.mushaf, lesson ? [lesson.range.page] : []);
+  const lp = lesson?.range.page ?? 0;
+  const oneChunk = student.volume !== "lines2";
+  // Соседняя страница для соединения: урок-страница соединяется с той, что выучена перед ней.
+  const joinPage =
+    lesson && oneChunk && lesson.range.from === 0 && student.hifz.memorized.includes(lp - student.direction)
+      ? lp - student.direction
+      : undefined;
+  // Следующая страница по тексту: с неё цепляется первое слово, когда урок доходит до конца страницы.
+  const meta = useMeta(student.mushaf);
+  const nextPage = lp && meta && lp < meta.pages ? lp + 1 : 0;
+  const { data } = usePages(student.mushaf, lesson ? [lp, ...(nextPage ? [nextPage] : []), ...(joinPage ? [joinPage] : [])] : []);
   const page = data?.[0];
+  const pageAt = (p?: number) => (p ? data?.find((d) => d.p === p) : undefined);
   const timer = useSessionTimer();
   const [peek, setPeek] = useState(false);
   const [finished, setFinished] = useState(false);
 
   const steps = useMemo(
-    () => (lesson && page ? buildSteps(lesson.range, page.l.length, student.method) : []),
-    [lesson?.range.page, lesson?.range.from, lesson?.range.to, page, student.method],
+    () => (lesson && page ? buildSteps(lesson.range, page.l.length, student.method, previousLesson(student, lesson.range), { oneChunk, joinPage }) : []),
+    [lesson?.range.page, lesson?.range.from, lesson?.range.to, page, student.method, student.submissions.length, oneChunk, joinPage],
   );
 
   // Время урока записывается в дневник при выходе с экрана.
@@ -64,6 +81,14 @@ export function LessonScreen({ student, onClose, onSubmitNow }: Props) {
 
   const stepIdx = Math.min(lesson.step, steps.length - 1);
   const step = steps[stepIdx];
+  // Слово-мостик: на каждом шаге заучивания цепляется первое слово следующей строки (учишь 1–2, цепляешь слово из 3-й).
+  const bridge = step && page && step.kind !== "readFirst" && step.range.to < page.l.length ? BRIDGE_WORDS : undefined;
+  // Урок дошёл до конца страницы: цепляется первое слово следующей страницы.
+  // При соединении со следующей по тексту страницей мостик не нужен, она и так читается.
+  const other = pageAt(step?.joinPage);
+  const next = pageAt(nextPage);
+  const bridgePage =
+    step && page && next && step.kind !== "readFirst" && step.range.to >= page.l.length && step.joinPage !== next.p ? next : undefined;
   const done = lesson.done;
   const daily = { reps: getDay(student).reps, target: student.method.dailyTarget };
 
@@ -119,7 +144,12 @@ export function LessonScreen({ student, onClose, onSubmitNow }: Props) {
       </div>
 
       <h2 className="step-title">{stepLabel(step, page.l.length, t)}</h2>
+      {bridge && <p className="muted center">{t("bridgeHint")}</p>}
+      {bridgePage && <p className="muted center">{t("bridgeHintPage")}</p>}
 
+      {other && other.p < page.p && (
+        <PageView mushaf={student.mushaf} page={other} surahs={surahs} active={[0, other.l.length]} hidden={step.hidden} peek={peek} />
+      )}
       <PageView
         mushaf={student.mushaf}
         page={page}
@@ -127,7 +157,23 @@ export function LessonScreen({ student, onClose, onSubmitNow }: Props) {
         active={[step.range.from, step.range.to]}
         hidden={step.hidden}
         peek={peek}
+        bridge={bridge}
       />
+      {other && other.p > page.p && (
+        <PageView mushaf={student.mushaf} page={other} surahs={surahs} active={[0, other.l.length]} hidden={step.hidden} peek={peek} />
+      )}
+      {bridgePage && (
+        <PageView
+          mushaf={student.mushaf}
+          page={bridgePage}
+          surahs={surahs}
+          active={[0, 0]}
+          bridge={BRIDGE_WORDS}
+          onlyActive
+          hidden={step.hidden}
+          peek={peek}
+        />
+      )}
 
       {step.hidden && (
         <button
@@ -141,7 +187,11 @@ export function LessonScreen({ student, onClose, onSubmitNow }: Props) {
         </button>
       )}
 
-      <Counter count={done} target={step.reps} onInc={inc} onUndo={undo} timer={timer} daily={daily} />
+      <Counter count={done} target={step.reps} onInc={inc} onUndo={undo} timer={timer}
+        limitMinutes={student.method.sessionMinutes}
+        onLimit={(m) => patchStudent(student.id, { method: { ...student.method, sessionMinutes: m } })}
+        daily={daily}
+      />
 
       <div className="row">
         <button className="ghost" onClick={() => goStep(stepIdx - 1)} disabled={stepIdx === 0}>

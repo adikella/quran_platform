@@ -8,9 +8,10 @@ import {
   removeStudent,
   setActive,
   setLang,
+  setTheme,
   useAppState,
 } from "../store";
-import type { Lang, Method, Student, Volume } from "../types";
+import type { Lang, Method, Stage, Student, Theme, Volume } from "../types";
 
 const NUMBER_FIELDS: (keyof Method)[] = [
   "readFirst",
@@ -24,6 +25,7 @@ const NUMBER_FIELDS: (keyof Method)[] = [
   "sabkiPages",
   "manzilJuz",
   "naziraJuz",
+  "sessionMinutes",
 ];
 
 export function SettingsScreen({ student, onAddStudent }: { student: Student; onAddStudent: () => void }) {
@@ -55,6 +57,16 @@ export function SettingsScreen({ student, onAddStudent }: { student: Student; on
             ))}
           </select>
         </label>
+        <label>
+          {t("theme")}
+          <select value={app.theme ?? "auto"} onChange={(e) => setTheme(e.target.value as Theme)}>
+            {(["auto", "light", "dark"] as Theme[]).map((v) => (
+              <option key={v} value={v}>
+                {t(`theme_${v}` as Key)}
+              </option>
+            ))}
+          </select>
+        </label>
       </section>
 
       <section className="card">
@@ -82,6 +94,17 @@ export function SettingsScreen({ student, onAddStudent }: { student: Student; on
         <p className="muted">
           {t("chooseMushaf")}: <b>{t(student.mushaf)}</b>. {t("mushafLocked")}
         </p>
+        <label>
+          {t("stage")}
+          <select value={student.stage} onChange={(e) => patchStudent(student.id, { stage: e.target.value as Stage })}>
+            {(["nazira", "hifz"] as Stage[]).map((v) => (
+              <option key={v} value={v}>
+                {t(`stage_${v}` as const)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <p className="muted small-note">{t("stageNote")}</p>
         <label>
           {t("volume")}
           <select value={student.volume} onChange={(e) => patchStudent(student.id, { volume: e.target.value as Volume })}>

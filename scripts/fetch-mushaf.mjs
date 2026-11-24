@@ -3,13 +3,15 @@
 //
 //   node scripts/fetch-mushaf.mjs            — оба мусхафа
 //   node scripts/fetch-mushaf.mjs madani     — только один
+//   node scripts/fetch-mushaf.mjs meta       — пересобрать meta.json из скачанных страниц
 //
 // Формат страницы (p<chunk>.json хранит 20 страниц подряд):
-//   { p: номер, j: джуз, v: ["2:142", ...] — аяты страницы по порядку,
+//   { p: номер, j: джуз, r: номер четверти хизба (1–240) на начало страницы, v: ["2:142", ...] — аяты страницы по порядку,
 //     l: [{ n: номер строки, f: индекс в v, с которого начинается строка,
 //           w: ["слово", ..., 142 (число = конец аята), ...] }] }
 
-import { mkdir, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -17,7 +19,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const API = "https://api.quran.com/api";
 
 const MUSHAFS = {
-  madani: { id: 5, pages: 604, field: "text_qpc_hafs" },
+  madani: { id: 5, pages: 604, field: "text_qpc_hafs", glyphs: true },
   indopak: { id: 6, pages: 610, field: "text_indopak" },
 };
 
@@ -37,10 +39,10 @@ async function getJson(url, tries = 5) {
 }
 
 async function fetchPage(mushaf, page) {
-  const { id, field } = MUSHAFS[mushaf];
+  const { id, field, glyphs } = MUSHAFS[mushaf];
   const url =
     `${API}/qdc/verses/by_page/${page}?words=true&per_page=100&mushaf=${id}` +
-    `&word_fields=line_number,page_number,${field}&fields=juz_number`;
+    `&word_fields=line_number,page_number,${field}${glyphs ? ",code_v2,v2_page" : ""}&fields=juz_number,rub_el_hizb_number`;
   const data = await getJson(url);
   const verses = data.verses;
   if (!verses?.length) throw new Error(`${mushaf} p${page}: пустая страница`);
@@ -50,22 +52,27 @@ async function fetchPage(mushaf, page) {
   verses.forEach((verse, vi) => {
     for (const w of verse.words) {
       if (w.page_number !== page) continue;
+      if (glyphs && w.v2_page !== page) console.warn(`${mushaf} p${page}: слово из шрифта страницы ${w.v2_page}`);
       let line = lines.get(w.line_number);
       if (!line) {
-        line = { n: w.line_number, f: vi, w: [] };
+        line = { n: w.line_number, f: vi, w: [], ...(glyphs ? { c: [] } : {}) };
         lines.set(w.line_number, line);
       }
       if (w.char_type_name === "end") {
         line.w.push(Number(verse.verse_key.split(":")[1]));
+        if (glyphs) line.c.push(w.code_v2);
       } else if (w.char_type_name === "word") {
         // Убираем невидимые служебные символы (U+200B, U+FEFF): шрифты рисуют их квадратиками.
         const text = (w[field] ?? w.text).replace(/[\u200B\uFEFF]/g, "").trim();
-        if (text) line.w.push(text);
+        if (text) {
+          line.w.push(text);
+          if (glyphs) line.c.push(w.code_v2);
+        }
       }
     }
   });
   const l = [...lines.values()].sort((a, b) => a.n - b.n);
-  return { p: page, j: verses[0].juz_number, v, l };
+  return { p: page, j: verses[0].juz_number, r: verses[0].rub_el_hizb_number, v, l };
 }
 
 async function pool(items, size, fn) {
@@ -103,15 +110,35 @@ async function fetchMushaf(mushaf) {
     await writeFile(join(dir, `p${c}.json`), JSON.stringify(slice));
   }
 
-  // Краткие сведения о каждой странице: джуз, первый и последний аят, число строк.
+  await writeMeta(mushaf, all);
+  console.log(`${mushaf}: готово, ${pages} страниц`);
+}
+
+/** Где в строке кончается аят: "2" строка кончается концом аята, "1" аят кончается посреди строки, "0" нет. */
+function ayahEnds(pg) {
+  return pg.l
+    .map((l) => (typeof l.w[l.w.length - 1] === "number" ? "2" : l.w.some((x) => typeof x === "number") ? "1" : "0"))
+    .join("");
+}
+
+// Краткие сведения о каждой странице: джуз, первый и последний аят, число строк, концы аятов по строкам.
+async function writeMeta(mushaf, all) {
   const meta = {
     mushaf,
-    pages,
+    pages: all.length,
     chunk: CHUNK,
-    page: all.map((pg) => [pg.j, pg.v[0], pg.v[pg.v.length - 1], pg.l.length]),
+    page: all.map((pg) => [pg.j, pg.v[0], pg.v[pg.v.length - 1], pg.l.length, ayahEnds(pg)]),
   };
-  await writeFile(join(dir, "meta.json"), JSON.stringify(meta));
-  console.log(`${mushaf}: готово, ${pages} страниц`);
+  await writeFile(join(ROOT, "public", "data", mushaf, "meta.json"), JSON.stringify(meta));
+}
+
+/** Пересобрать meta.json из уже скачанных страниц, без сети. */
+async function rebuildMeta(mushaf) {
+  const dir = join(ROOT, "public", "data", mushaf);
+  const all = [];
+  for (let c = 0; existsSync(join(dir, `p${c}.json`)); c++) all.push(...JSON.parse(await readFile(join(dir, `p${c}.json`), "utf8")));
+  await writeMeta(mushaf, all);
+  console.log(`${mushaf}: meta.json пересобран`);
 }
 
 async function fetchSurahs() {
@@ -134,7 +161,43 @@ async function fetchSurahs() {
   console.log("surahs.json: готово");
 }
 
+// Постраничные шрифты QCF (Комплекс короля Фахда): по одному файлу на страницу мединского мусхафа.
+// Каждое слово страницы хранится в данных как код глифа (поле c) и рисуется своим шрифтом.
+const FONT_URL = (p) => `https://verses.quran.foundation/fonts/quran/hafs/v2/woff2/p${p}.woff2`;
+
+async function fetchFonts() {
+  const dir = join(ROOT, "public", "fonts", "qcf2");
+  await mkdir(dir, { recursive: true });
+  const pages = Array.from({ length: MUSHAFS.madani.pages }, (_, i) => i + 1);
+  let done = 0;
+  await pool(pages, 6, async (p) => {
+    const file = join(dir, `p${p}.woff2`);
+    if (!existsSync(file)) {
+      for (let i = 0; ; i++) {
+        try {
+          const res = await fetch(FONT_URL(p));
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          await writeFile(file, Buffer.from(await res.arrayBuffer()));
+          break;
+        } catch (err) {
+          if (i >= 4) throw new Error(`шрифт p${p}: ${err.message}`);
+          await new Promise((r) => setTimeout(r, 1000 * 2 ** i));
+        }
+      }
+    }
+    if (++done % 100 === 0) console.log(`шрифты: ${done}/${pages.length}`);
+  });
+  console.log("шрифты QCF: готово");
+}
+
 const which = process.argv.slice(2);
-const targets = which.length ? which : Object.keys(MUSHAFS);
-await fetchSurahs();
-for (const m of targets) await fetchMushaf(m);
+if (which.includes("fonts")) {
+  await fetchFonts();
+} else if (which.includes("meta")) {
+  for (const m of Object.keys(MUSHAFS)) await rebuildMeta(m);
+} else {
+  const targets = which.length ? which : Object.keys(MUSHAFS);
+  await fetchSurahs();
+  for (const m of targets) await fetchMushaf(m);
+  if (targets.includes("madani")) await fetchFonts();
+}

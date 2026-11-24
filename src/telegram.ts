@@ -23,6 +23,11 @@ export function initTelegram() {
   if (tg.colorScheme) document.documentElement.dataset.theme = tg.colorScheme;
 }
 
+/** Тема, которую просит Telegram; вне Telegram undefined, и работает системная. */
+export function telegramTheme(): "light" | "dark" | undefined {
+  return inTelegram && tg?.colorScheme ? tg.colorScheme : undefined;
+}
+
 export function haptic(kind: "tap" | "success" | "error" = "tap") {
   const h = inTelegram ? tg?.HapticFeedback : undefined;
   if (h) {

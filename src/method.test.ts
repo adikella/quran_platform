@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildSteps, chunkLines, DEFAULT_METHOD, gradeFor, nextLessonRange, revision } from "./method";
+import { buildSteps, chunkLines, dayPart, DEFAULT_METHOD, gradeFor, nextLessonRange, revision } from "./method";
 import type { Student } from "./types";
 
 describe("chunkLines", () => {
@@ -37,18 +37,19 @@ describe("nextLessonRange", () => {
 });
 
 describe("buildSteps", () => {
-  it("урок из 4 строк: 20 раз страница, 5+5+20 на кусок, соединение 20, весь урок 20", () => {
+  it("урок из 4 строк: 20 раз страница, 10+10+20 на кусок, соединение 20, весь урок 20", () => {
     const steps = buildSteps({ page: 1, from: 0, to: 4 }, 15, DEFAULT_METHOD);
     expect(steps.map((s) => [s.kind, s.reps])).toEqual([
       ["readFirst", 20],
-      ["look", 5],
-      ["blind", 5],
+      ["look", 10],
+      ["blind", 10],
       ["heart", 20],
-      ["look", 5],
-      ["blind", 5],
+      ["look", 10],
+      ["blind", 10],
       ["heart", 20],
       ["join", 20],
       ["whole", 20],
+      ["repeat", 60],
     ]);
     expect(steps[0].range).toEqual({ page: 1, from: 0, to: 15 });
     expect(steps[7].range).toEqual({ page: 1, from: 0, to: 4 });
@@ -92,11 +93,28 @@ describe("revision", () => {
     },
   });
 
-  it("сабки — не больше 10 последних страниц, остальное сразу в манзиль", () => {
-    const r = revision(student(Array.from({ length: 15 }, (_, i) => i + 1), 4), juzOf, lines);
-    expect(r.sabki[0]).toEqual({ page: 16, from: 0, to: 4 });
-    expect(r.sabki).toHaveLength(11);
-    expect(r.manzilGroups).toEqual([{ juz: 1, pages: [1, 2, 3, 4, 5] }]);
+  it("сабки сдаются пачками по 10: выучено 14, сдаются первые 10, остальные 4 ждут", () => {
+    const r = revision(student(Array.from({ length: 14 }, (_, i) => i + 1), 0), juzOf, lines);
+    expect(r.sabki.map((x) => x.page)).toEqual([10, 9, 8, 7, 6, 5, 4, 3, 2, 1]);
+    expect(r.sabkiWaiting).toEqual([11, 12, 13, 14]);
+    expect(r.manzilGroups).toEqual([]);
+  });
+
+  it("выучено 24 страницы джуза: сдаётся вторая пачка (11–20), прошлые джузы в манзиль", () => {
+    // juzOf здесь по 30 страниц, чтобы в джузе поместилось больше двух пачек
+    const juz30 = (p: number) => Math.ceil(p / 30);
+    const r = revision(student(Array.from({ length: 54 }, (_, i) => i + 1), 0), juz30, lines);
+    // страницы 31–54 это джуз 2: выучено 24, полных пачек 2, сдаются страницы 41–50
+    expect(r.sabki.map((x) => x.page)).toEqual([50, 49, 48, 47, 46, 45, 44, 43, 42, 41]);
+    expect(r.manzilGroups.map((g) => g.juz)).toEqual([1]);
+  });
+
+  it("новичок: пока выучено меньше 10 страниц одного джуза, всё это сабки и манзиля нет", () => {
+    const r = revision(student([1, 2, 3], 4), juzOf, lines);
+    expect(r.sabki[0]).toEqual({ page: 4, from: 0, to: 4 });
+    expect(r.sabki.slice(1).map((x) => x.page)).toEqual([3, 2, 1]);
+    expect(r.manzilGroups).toEqual([]);
+    expect(r.manzilToday).toEqual([]);
   });
 
   it("манзиль — до 2 джузов за утро, по кругу", () => {
@@ -106,5 +124,80 @@ describe("revision", () => {
     expect(r0.manzilToday.map((g) => g.juz)).toEqual([1, 2]);
     const r1 = revision(student(pages, 0, 2), juzOf, lines);
     expect(r1.manzilToday.map((g) => g.juz)).toEqual([3, 1]);
+  });
+});
+
+describe("dayPart", () => {
+  const at = (h: number, m = 0) => new Date(2026, 0, 5, h, m);
+  const mm = { morningStart: "08:00", morningEnd: "10:00" };
+  it("распорядок дня по часам", () => {
+    expect(dayPart(at(3), mm)).toBe("sleep");
+    expect(dayPart(at(5), mm)).toBe("submit");
+    expect(dayPart(at(8), mm)).toBe("morning");
+    expect(dayPart(at(11), mm)).toBe("rest");
+    expect(dayPart(at(13), mm)).toBe("learn");
+    expect(dayPart(at(16), mm)).toBe("break");
+    expect(dayPart(at(19), mm)).toBe("prepare");
+    expect(dayPart(at(20, 30), mm)).toBe("old");
+    expect(dayPart(at(22), mm)).toBe("sleep");
+  });
+});
+
+describe("соединение с прошлым уроком", () => {
+  it("после урока 1–2 урок 3–4 кончается соединением 1–4", () => {
+    const steps = buildSteps({ page: 3, from: 2, to: 4 }, 15, DEFAULT_METHOD, { page: 3, from: 0, to: 2 });
+    const last = steps[steps.length - 2];
+    expect(last.kind).toBe("join");
+    expect(last.range).toEqual({ page: 3, from: 0, to: 4 });
+    expect(last.reps).toBe(DEFAULT_METHOD.join);
+    expect(last.hidden).toBe(true);
+  });
+  it("первый урок на странице без соединения", () => {
+    const steps = buildSteps({ page: 3, from: 0, to: 2 }, 15, DEFAULT_METHOD);
+    expect(steps.some((s) => s.kind === "join")).toBe(false);
+  });
+});
+
+describe("соединение в конце страницы", () => {
+  it("последний урок страницы соединяется со всей страницей", () => {
+    const steps = buildSteps({ page: 3, from: 12, to: 15 }, 15, DEFAULT_METHOD, { page: 3, from: 10, to: 12 });
+    const last = steps[steps.length - 2];
+    expect(last.kind).toBe("join");
+    expect(last.range).toEqual({ page: 3, from: 0, to: 15 });
+  });
+});
+
+describe("повторение до нормы", () => {
+  it("урок из 2 строк добирается до 200 повторений", () => {
+    const steps = buildSteps({ page: 3, from: 2, to: 4 }, 15, DEFAULT_METHOD, { page: 3, from: 0, to: 2 });
+    const last = steps[steps.length - 1];
+    expect(last.kind).toBe("repeat");
+    expect(last.range).toEqual({ page: 3, from: 0, to: 4 });
+    expect(steps.reduce((n, s) => n + s.reps, 0)).toBe(DEFAULT_METHOD.dailyTarget);
+  });
+  it("если шаги уже дают норму, повтора нет", () => {
+    const steps = buildSteps({ page: 3, from: 0, to: 15 }, 15, DEFAULT_METHOD);
+    expect(steps.some((s) => s.kind === "repeat")).toBe(false);
+  });
+});
+
+describe("урок одним куском (полстраницы и страница)", () => {
+  it("страница: читать 20, глядя 10, не глядя 10, наизусть 20, соединить со вчерашней, добрать до 200", () => {
+    const steps = buildSteps({ page: 5, from: 0, to: 15 }, 15, DEFAULT_METHOD, undefined, { oneChunk: true, joinPage: 4 });
+    expect(steps.map((s) => s.kind)).toEqual(["readFirst", "look", "blind", "heart", "join", "repeat"]);
+    expect(steps.slice(1, 4).every((s) => s.range.from === 0 && s.range.to === 15)).toBe(true);
+    expect(steps[4].joinPage).toBe(4);
+    expect(steps[5].range).toEqual({ page: 5, from: 0, to: 15 });
+    expect(steps.reduce((n, s) => n + s.reps, 0)).toBe(200);
+  });
+  it("первая страница без соединения", () => {
+    const steps = buildSteps({ page: 5, from: 0, to: 15 }, 15, DEFAULT_METHOD, undefined, { oneChunk: true });
+    expect(steps.map((s) => s.kind)).toEqual(["readFirst", "look", "blind", "heart", "repeat"]);
+  });
+  it("вторая половина страницы одним куском и соединение всей страницы", () => {
+    const steps = buildSteps({ page: 5, from: 8, to: 15 }, 15, DEFAULT_METHOD, { page: 5, from: 0, to: 8 }, { oneChunk: true });
+    expect(steps.map((s) => s.kind)).toEqual(["readFirst", "look", "blind", "heart", "join", "repeat"]);
+    expect(steps[1].range).toEqual({ page: 5, from: 8, to: 15 });
+    expect(steps[4].range).toEqual({ page: 5, from: 0, to: 15 });
   });
 });

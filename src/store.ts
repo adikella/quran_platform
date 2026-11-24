@@ -13,6 +13,7 @@ import type {
   Student,
   Submission,
   SubmissionKind,
+  Theme,
   TimeCategory,
   Volume,
 } from "./types";
@@ -99,6 +100,10 @@ export function getDay(s: Student, date = todayKey()) {
 
 // ---------- действия ----------
 
+export function setTheme(theme: Theme) {
+  set({ ...state, theme });
+}
+
 export function setLang(lang: Lang) {
   set({ ...state, lang });
 }
@@ -144,8 +149,18 @@ export function removeStudent(id: string) {
   set({ ...state, students, activeId: students[0]?.id ?? null });
 }
 
-export function patchStudent(id: string, patch: Partial<Pick<Student, "name" | "volume" | "direction" | "method">>) {
+export function patchStudent(id: string, patch: Partial<Pick<Student, "name" | "volume" | "direction" | "method" | "stage">>) {
   updateStudent(id, (s) => ({ ...s, ...patch }));
+}
+
+/** Поставить закладку на страницу мусхафа или снять её (null). */
+export function setBookmark(id: string, page: number | null) {
+  updateStudent(id, (s) => {
+    const next = { ...s };
+    if (page === null) delete next.bookmark;
+    else next.bookmark = page;
+    return next;
+  });
 }
 
 /** Перейти от назиры к заучиванию. Заучивание начинается со страницы `startPage`. */

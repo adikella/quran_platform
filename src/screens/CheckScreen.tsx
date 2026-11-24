@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { PageView, type WordMark } from "../components/PageView";
+import { Recorder } from "../components/Recorder";
 import { fmtDuration, usePages, useSessionTimer, useSurahs, useT } from "../hooks";
 import { gradeFor } from "../method";
 import { versesOfRange } from "../mushaf";
@@ -92,6 +93,7 @@ export function CheckScreen({ student, kind, ranges, groups, pages, lineCount, o
       <h2>{t(`check_${kind}` as const)}</h2>
       <p className="hint">{t("checkHint")}</p>
       <p className="hint muted">{t("aiSoon")}</p>
+      <Recorder />
 
       {!data && <p className="muted">{t("loading")}</p>}
       {data?.map((page, i) => (

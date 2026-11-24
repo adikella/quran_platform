@@ -86,7 +86,7 @@ export function verseSpanLabel(from: string, to: string, surahs: Surah[], lang: 
   const [sb, vb] = to.split(":").map(Number);
   const na = surahName(surahs[sa - 1], lang);
   if (sa === sb) return va === vb ? `${na} ${va}` : `${na} ${va}–${vb}`;
-  return `${na} ${va} — ${surahName(surahs[sb - 1], lang)} ${vb}`;
+  return `${na} ${va} – ${surahName(surahs[sb - 1], lang)} ${vb}`;
 }
 
 /** Арабские цифры для знака конца аята. */

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Counter } from "../components/Counter";
 import { PageView } from "../components/PageView";
 import { usePages, useSessionTimer, useSurahs, useT } from "../hooks";
-import { addRep, addTime, getDay } from "../store";
+import { addTime, patchStudent } from "../store";
 import { haptic } from "../telegram";
 import type { LineRange, Student, TimeCategory } from "../types";
 
@@ -15,10 +15,12 @@ interface Props {
   onClose: () => void;
   onSubmit: () => void;
   submitLabel: string;
+  /** Сколько раз прочитать; счётчик на этом останавливается. Без него счёт без ограничения. */
+  target?: number;
 }
 
 /** Чтение или повторение (назира, сабки, манзиль) со счётчиком и таймером. */
-export function ReadScreen({ student, title, ranges, category, until, onClose, onSubmit, submitLabel }: Props) {
+export function ReadScreen({ student, title, ranges, category, until, onClose, onSubmit, submitLabel, target }: Props) {
   const t = useT();
   const surahs = useSurahs();
   const { data } = usePages(
@@ -29,8 +31,6 @@ export function ReadScreen({ student, title, ranges, category, until, onClose, o
   const [count, setCount] = useState(0);
 
   useEffect(() => () => addTime(student.id, category, timer.read()), []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const daily = { reps: getDay(student).reps, target: student.method.dailyTarget };
 
   return (
     <div className="screen">
@@ -43,20 +43,21 @@ export function ReadScreen({ student, title, ranges, category, until, onClose, o
 
       <Counter
         count={count}
+        target={target}
         onInc={() => {
-          haptic("tap");
+          if (target && count >= target) return;
+          haptic(target && count + 1 >= target ? "success" : "tap");
           timer.lap();
           setCount((c) => c + 1);
-          addRep(student.id);
         }}
         onUndo={() => {
           if (!count) return;
           timer.undoLap();
           setCount((c) => c - 1);
-          addRep(student.id, -1);
         }}
         timer={timer}
-        daily={daily}
+        limitMinutes={student.method.sessionMinutes}
+        onLimit={(m) => patchStudent(student.id, { method: { ...student.method, sessionMinutes: m } })}
         until={until}
       />
 

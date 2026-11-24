@@ -1,7 +1,9 @@
 import { useState } from "react";
-import { useMeta, useT } from "../hooks";
-import { naziraTargetPages, nextLessonRange, revision, todayKey } from "../method";
-import { beginLesson, getDay, startHifz } from "../store";
+import { useMeta, useNow, usePages, useSurahs, useT } from "../hooks";
+import { dayPart, naziraTargetPages, nextLessonRange, revision, todayKey } from "../method";
+import { verseSpanLabel, versesOfRange } from "../mushaf";
+import { beginLesson, getDay, startHifz, useAppState } from "../store";
+import type { Key } from "../i18n";
 import type { LineRange, MushafMeta, Student, SubmissionKind } from "../types";
 
 export type Nav =
@@ -118,11 +120,21 @@ function Nazira({ s, meta, go }: { s: Student; meta: MushafMeta; go: Props["go"]
         </div>
       </section>
 
-      {done >= target && (
+      {done >= target ? (
         <section className="card accent">
           <p>{t("naziraDone")}</p>
           <StartPicker meta={meta} page={startPage} setPage={setStartPage} dir={dir} setDir={setDir} />
           <button onClick={() => startHifz(s.id, startPage, dir)}>{t("startHifz")}</button>
+        </section>
+      ) : (
+        <section className="card">
+          {/* Попал на чтение случайно или чтение уже пройдено: сразу к заучиванию. */}
+          <h3>{t("toHifzTitle")}</h3>
+          <p className="muted">{t("toHifzNote")}</p>
+          <StartPicker meta={meta} page={startPage} setPage={setStartPage} dir={dir} setDir={setDir} />
+          <button className="ghost" onClick={() => startHifz(s.id, startPage, dir)}>
+            {t("startHifz")}
+          </button>
         </section>
       )}
     </div>
@@ -183,10 +195,36 @@ function Hifz({ s, meta, go }: { s: Student; meta: MushafMeta; go: Props["go"] }
   const finished = memorized.includes(cur.page) && cur.line >= lineCount(cur.page);
   const manzilRanges: LineRange[] = rev.manzilToday.flatMap((g) => g.pages.map((p) => ({ page: p, from: 0, to: lineCount(p) })));
   const sabkiCount = rev.sabki.length;
+  const now = useNow(30000);
+  const part = dayPart(now, m);
+  const nowKey = (part === "submit" && !pending ? "now_submitNone" : `now_${part}`) as Key;
+  const surahs = useSurahs();
+  const { lang } = useAppState();
+  /** Манзиль записывается так: джуз и страницы. */
+  const manzilLine = (g: { juz: number; pages: number[] }) => t("manzilGroup", { j: g.juz, a: Math.min(...g.pages), b: Math.max(...g.pages) });
+  // Сабки записывается так: джуз, сура и аяты (с какого по какой), включая неполную страницу.
+  const { data: sabkiPages } = usePages(s.mushaf, rev.sabki.map((r) => r.page));
+  const sabkiVerses = sabkiPages
+    ? rev.sabki.flatMap((r, i) => versesOfRange(sabkiPages[i], r.from, r.to)).sort((x, y) => {
+        const [sa, va] = x.split(":").map(Number);
+        const [sb, vb] = y.split(":").map(Number);
+        return sa - sb || va - vb;
+      })
+    : [];
+  const sabkiSpan = sabkiVerses.length ? verseSpanLabel(sabkiVerses[0], sabkiVerses[sabkiVerses.length - 1], surahs, lang) : "";
+  const sabkiJuz = rev.sabki.length ? juzOf(rev.sabki[0].page) : 0;
+  const manzilNextGroup = rev.manzilGroups.length > rev.manzilToday.length
+    ? rev.manzilGroups[(s.hifz.manzilCursor + rev.manzilToday.length) % rev.manzilGroups.length]
+    : null;
 
   return (
     <div className="screen">
       <DailyBar s={s} />
+
+      <div className="now" role="status">
+        <span className="now-lead">{t("nowLead")}</span>
+        <b>{t(nowKey)}</b>
+      </div>
 
       <div className="block-label">{t("afterFajr")}</div>
       <section className="card">
@@ -212,10 +250,23 @@ function Hifz({ s, meta, go }: { s: Student; meta: MushafMeta; go: Props["go"] }
         </div>
         {sabkiCount ? (
           <>
-            <p>
-              {t("sabkiPages", { n: sabkiCount })}:{" "}
-              <span className="muted">{rangesText(rev.sabki, lineCount, t)}</span>
-            </p>
+            <div className="manzil-today">
+              <span className="muted">{t("sabkiTodayLead")}:</span>
+              <p>
+                <b>
+                  {t("juz")} {sabkiJuz}, {sabkiSpan || rangesText(rev.sabki, lineCount, t)}
+                </b>
+              </p>
+              {rev.sabkiWaiting.length > 0 && (
+                <p className="muted">
+                  {t("sabkiWaiting", {
+                    n: Math.max(0, m.sabkiPages - rev.sabkiWaiting.length),
+                    a: Math.min(...rev.sabkiWaiting),
+                    b: Math.max(...rev.sabkiWaiting),
+                  })}
+                </p>
+              )}
+            </div>
             <div className="row">
               <button className="ghost" onClick={() => go({ name: "read", kind: "sabki", ranges: rev.sabki })}>
                 {t("readCounter")}
@@ -235,7 +286,19 @@ function Hifz({ s, meta, go }: { s: Student; meta: MushafMeta; go: Props["go"] }
         </div>
         {rev.manzilToday.length ? (
           <>
-            <p>{rev.manzilToday.map((g) => t("manzilJuz", { j: g.juz, n: g.pages.length })).join(" · ")}</p>
+            <div className="manzil-today">
+              <span className="muted">{t("manzilTodayLead")}:</span>
+              {rev.manzilToday.map((g) => (
+                <p key={g.juz}>
+                  <b>{manzilLine(g)}</b>
+                </p>
+              ))}
+              {manzilNextGroup && (
+                <p className="muted">
+                  {t("manzilNext")}: {manzilLine(manzilNextGroup)}
+                </p>
+              )}
+            </div>
             <div className="row">
               <button
                 className="ghost"

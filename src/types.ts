@@ -32,6 +32,8 @@ export interface Method {
   manzilJuz: number;
   /** Назира: сколько джузов прочитать до начала заучивания. */
   naziraJuz: number;
+  /** Таймер занятия: сколько минут отведено (0: считать время вперёд). */
+  sessionMinutes: number;
   /** Утренний блок сабки и манзиля. */
   morningStart: string;
   morningEnd: string;
@@ -44,7 +46,7 @@ export interface LineRange {
   to: number;
 }
 
-export type StepKind = "readFirst" | "look" | "blind" | "heart" | "join" | "whole";
+export type StepKind = "readFirst" | "look" | "blind" | "heart" | "join" | "whole" | "repeat";
 
 export interface Step {
   kind: StepKind;
@@ -55,6 +57,8 @@ export interface Step {
   reps: number;
   /** Номер куска (с 0), к которому относится шаг. */
   chunk: number;
+  /** Соединение страниц: вторая страница, которую читают вместе с range (целиком). */
+  joinPage?: number;
 }
 
 export interface LessonProgress {
@@ -108,12 +112,18 @@ export interface Student {
     manzilCursor: number;
   };
   submissions: Submission[];
+  /** Страница, отмеченная закладкой в мусхафе. */
+  bookmark?: number;
   days: Record<string, DayStats>;
 }
+
+export type Theme = "auto" | "light" | "dark";
 
 export interface AppState {
   version: 1;
   lang: Lang;
+  /** Оформление: как в системе или в Telegram (auto), светлое или тёмное. */
+  theme?: Theme;
   students: Student[];
   activeId: string | null;
 }
@@ -124,11 +134,15 @@ export interface PageLine {
   f: number;
   /** Слова; число — знак конца аята с этим номером. */
   w: (string | number)[];
+  /** Мединский мусхаф: коды глифов шрифта QCF страницы, по одному на каждый элемент w. */
+  c?: string[];
 }
 
 export interface PageData {
   p: number;
   j: number;
+  /** Номер четверти хизба (1–240), с которой начинается страница; в джузе их 8. */
+  r?: number;
   v: string[];
   l: PageLine[];
 }
@@ -137,8 +151,11 @@ export interface MushafMeta {
   mushaf: MushafId;
   pages: number;
   chunk: number;
-  /** [джуз, первый аят, последний аят, число текстовых строк] для каждой страницы. */
-  page: [number, string, string, number][];
+  /**
+   * [джуз, первый аят, последний аят, число текстовых строк, концы аятов] для каждой страницы.
+   * Концы аятов: по символу на строку, "2" строка кончается концом аята, "1" аят кончается посреди строки, "0" нет.
+   */
+  page: [number, string, string, number, string?][];
 }
 
 export interface Surah {

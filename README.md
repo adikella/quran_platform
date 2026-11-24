@@ -67,6 +67,8 @@ npm run build      # сборка в dist/
 
 ```bash
 npm run fetch-mushaf
+# качает и разметку, и 604 шрифта QCF (около 94 МБ, в git они не хранятся);
+# только шрифты: npm run fetch-mushaf -- fonts
 # в облачной среде Claude Node нужен прокси: NODE_USE_ENV_PROXY=1 npm run fetch-mushaf
 ```
 
@@ -84,3 +86,16 @@ npm run fetch-mushaf
 | `src/i18n.ts` | Переводы на 4 языка |
 | `src/screens/` | Экраны: Сегодня, урок, сдача, повторение, дневник, прогресс, мусхаф, настройки |
 | `scripts/fetch-mushaf.mjs` | Скачивание разметки мусхафов |
+
+## Где работает
+
+Сервер Oracle «quran» (Франкфурт, Ampere A1, Ubuntu 24.04), адрес **https://130-61-147-45.sslip.io**.
+Nginx отдаёт собранное приложение из `/var/www/quran`, сертификат Let's Encrypt продлевается сам (certbot).
+
+Выложить новую версию:
+
+```bash
+./scripts/deploy.sh
+```
+
+Вход на сервер: `ssh -i ~/.ssh/quran_oracle ubuntu@130.61.147.45`.

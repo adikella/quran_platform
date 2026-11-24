@@ -11,6 +11,7 @@ import { ReadScreen } from "./screens/ReadScreen";
 import { SettingsScreen } from "./screens/SettingsScreen";
 import { TodayScreen, type Nav } from "./screens/TodayScreen";
 import { activeStudent, useAppState } from "./store";
+import { telegramTheme } from "./telegram";
 
 type Tab = "today" | "mushaf" | "journal" | "progress" | "settings";
 const TABS: Tab[] = ["today", "mushaf", "journal", "progress", "settings"];
@@ -23,8 +24,16 @@ export function App() {
   const [tab, setTab] = useState<Tab>("today");
   const [nav, setNav] = useState<Nav | null>(null);
   const [adding, setAdding] = useState(false);
-  const [mushafPage, setMushafPage] = useState(1);
+  const [mushafPage, setMushafPage] = useState(() => student?.bookmark ?? 1);
   const meta = useMeta(student?.mushaf ?? "madani");
+
+  useEffect(() => {
+    const root = document.documentElement;
+    const theme = app.theme ?? "auto";
+    const forced = theme === "auto" ? telegramTheme() : theme;
+    if (forced) root.dataset.theme = forced;
+    else delete root.dataset.theme;
+  }, [app.theme]);
 
   useEffect(() => {
     document.documentElement.lang = app.lang;
@@ -75,6 +84,7 @@ export function App() {
         onClose={close}
         onSubmit={() => setNav({ ...nav, name: "check" })}
         submitLabel={t(submitKey[nav.kind])}
+        target={nav.kind === "nazira" ? student.method.readFirst : undefined}
       />
     );
   }

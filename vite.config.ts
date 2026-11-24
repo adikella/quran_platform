@@ -5,5 +5,6 @@ import { defineConfig } from "vite";
 export default defineConfig({
   base: "./",
   plugins: [react()],
-  server: { host: true },
+  // allowedHosts: временная ссылка cloudflared для проверки с телефона.
+  server: { host: true, allowedHosts: [".trycloudflare.com"] },
 });
