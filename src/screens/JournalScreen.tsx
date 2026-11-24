@@ -10,26 +10,32 @@ function razWord(n: number) {
   return a >= 2 && a <= 4 && (b < 12 || b > 14) ? "раза" : "раз";
 }
 
-function SubLine({ sub }: { sub: Submission }) {
+function SubLine({ sub, onOpen }: { sub: Submission; onOpen?: (s: Submission) => void }) {
   const { lang } = useAppState();
   const surahs = useSurahs();
   const t = useT();
+  const open = onOpen && (sub.marks || sub.comment) ? () => onOpen(sub) : undefined;
   return (
     <div className="sub-line">
       <span>
         {verseSpanLabel(sub.fromVerse, sub.toVerse, surahs, lang)}
         {sub.peeks ? <span className="muted"> ({t("check_peeks")}: {sub.peeks})</span> : null}
+        {open && (
+          <button className="link inline" onClick={open}>
+            {t("result_open")}
+          </button>
+        )}
       </span>
       <span className={`pill ${sub.passed ? "ok" : "bad"}`}>
         {sub.grade}
-        {!sub.passed && ` · ${t("retake")}`}
+        {!sub.passed && `, ${t("retake")}`}
       </span>
     </div>
   );
 }
 
 /** Дневник: те же колонки, что в бумажном дневнике медресе. */
-export function JournalScreen({ student }: { student: Student }) {
+export function JournalScreen({ student, onOpen }: { student: Student; onOpen?: (s: Submission) => void }) {
   const t = useT();
   const { lang } = useAppState();
   const surahs = useSurahs();
@@ -55,12 +61,12 @@ export function JournalScreen({ student }: { student: Student }) {
             <div className="card-head">
               <h3>{fmtDate(date)}</h3>
               <span className="muted">
-                {t("col_reps")}: {day?.reps ?? 0} · {t("col_time")}: {Math.round(seconds / 60)} {t("min")}
+                {t("col_reps")}: {day?.reps ?? 0}, {t("col_time")}: {Math.round(seconds / 60)} {t("min")}
               </span>
             </div>
             <dl>
               <dt>{t("col_ustaz")}</dt>
-              <dd>{ustaz.length ? ustaz.map((s) => <SubLine key={s.id} sub={s} />) : "—"}</dd>
+              <dd>{ustaz.length ? ustaz.map((s) => <SubLine key={s.id} sub={s} onOpen={onOpen} />) : t("none")}</dd>
               <dt>{t("col_sabak")}</dt>
               <dd>
                 {day?.learned.length
@@ -70,10 +76,10 @@ export function JournalScreen({ student }: { student: Student }) {
                         {l.reps !== undefined && <span className="muted">{t("readTimes", { n: l.reps, raz: razWord(l.reps) })}</span>}
                       </div>
                     ))
-                  : "—"}
+                  : t("none")}
               </dd>
               <dt>{t("col_sabki")}</dt>
-              <dd>{sabki.length ? sabki.map((s) => <SubLine key={s.id} sub={s} />) : "—"}</dd>
+              <dd>{sabki.length ? sabki.map((s) => <SubLine key={s.id} sub={s} onOpen={onOpen} />) : t("none")}</dd>
               <dt>{t("col_manzil")}</dt>
               <dd>
                 {manzil.length
@@ -84,11 +90,16 @@ export function JournalScreen({ student }: { student: Student }) {
                           <span>
                             {t("juz")} {juz.join(", ")}
                           </span>
+                          {onOpen && (s.marks || s.comment) && (
+                            <button className="link inline" onClick={() => onOpen(s)}>
+                              {t("result_open")}
+                            </button>
+                          )}
                           <span className={`pill ${s.passed ? "ok" : "bad"}`}>{s.grade}</span>
                         </div>
                       );
                     })
-                  : "—"}
+                  : t("none")}
               </dd>
             </dl>
           </section>

@@ -23,4 +23,8 @@ ssh -i "$KEY" -o BatchMode=yes "$HOST" \
 rsync -az -e "ssh -i $KEY -o BatchMode=yes" server/asr.py "$HOST:/tmp/quran-asr.py"
 ssh -i "$KEY" -o BatchMode=yes "$HOST" \
   'sudo install -m 644 /tmp/quran-asr.py /opt/quran-asr/asr.py && sudo systemctl restart quran-asr'
+# Аккаунты, прогресс и сдачи. Первая установка: scripts/install-api.sh.
+rsync -az -e "ssh -i $KEY -o BatchMode=yes" server/api.py "$HOST:/tmp/quran-api.py"
+ssh -i "$KEY" -o BatchMode=yes "$HOST" \
+  'sudo install -m 644 /tmp/quran-api.py /opt/quran-api/api.py && sudo systemctl restart quran-api'
 echo "Готово: https://130-61-147-45.sslip.io"

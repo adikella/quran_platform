@@ -4,9 +4,11 @@ import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import "./install";
 import "./styles.css";
+import { startSync } from "./sync";
 import { initTelegram } from "./telegram";
 
 initTelegram();
+startSync();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

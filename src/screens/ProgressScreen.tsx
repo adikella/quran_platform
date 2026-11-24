@@ -5,7 +5,7 @@ import type { Student } from "../types";
 type Status = "manzil" | "sabki" | "current" | "nazira" | "none";
 
 /** Карта: все страницы выбранного мусхафа по джузам, у каждой свой статус. */
-export function ProgressScreen({ student, openPage }: { student: Student; openPage: (p: number) => void }) {
+export function ProgressScreen({ student, openPage }: { student: Student; openPage?: (p: number) => void }) {
   const t = useT();
   const meta = useMeta(student.mushaf);
   if (!meta) return <p className="muted pad">{t("loading")}</p>;
@@ -51,7 +51,8 @@ export function ProgressScreen({ student, openPage }: { student: Student; openPa
                   className={`cell ${status.get(p) ?? "none"}`}
                   title={`${t("page")} ${p}`}
                   aria-label={`${t("page")} ${p}`}
-                  onClick={() => openPage(p)}
+                  disabled={!openPage}
+                  onClick={() => openPage?.(p)}
                 />
               ))}
             </div>

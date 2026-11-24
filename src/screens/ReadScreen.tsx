@@ -1,3 +1,4 @@
+import { Icon } from "../icons";
 import { useEffect, useState } from "react";
 import { Counter } from "../components/Counter";
 import { PageView } from "../components/PageView";
@@ -36,7 +37,7 @@ export function ReadScreen({ student, title, ranges, category, until, onClose, o
     <div className="screen">
       <header className="bar-top">
         <button className="ghost small" onClick={onClose}>
-          ← {t("back")}
+          <Icon name="back" size={16} /> {t("back")}
         </button>
         <span className="muted">{title}</span>
       </header>

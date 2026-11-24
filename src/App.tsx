@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useMeta, useT } from "./hooks";
 import type { Key } from "./i18n";
+import { Icon } from "./icons";
 import { CheckScreen } from "./screens/CheckScreen";
 import { JournalScreen } from "./screens/JournalScreen";
 import { LessonScreen } from "./screens/LessonScreen";
@@ -8,14 +9,16 @@ import { MushafScreen } from "./screens/MushafScreen";
 import { Onboarding } from "./screens/Onboarding";
 import { ProgressScreen } from "./screens/ProgressScreen";
 import { ReadScreen } from "./screens/ReadScreen";
+import { ResultScreen } from "./screens/ResultScreen";
 import { SettingsScreen } from "./screens/SettingsScreen";
+import { TeacherApp } from "./screens/TeacherApp";
 import { TodayScreen, type Nav } from "./screens/TodayScreen";
 import { activeStudent, useAppState } from "./store";
+import { useSync } from "./sync";
 import { telegramTheme } from "./telegram";
 
 type Tab = "today" | "mushaf" | "journal" | "progress" | "settings";
 const TABS: Tab[] = ["today", "mushaf", "journal", "progress", "settings"];
-const ICONS: Record<Tab, string> = { today: "◎", mushaf: "▤", journal: "☰", progress: "▦", settings: "⚙" };
 
 export function App() {
   const app = useAppState();
@@ -26,6 +29,7 @@ export function App() {
   const [adding, setAdding] = useState(false);
   const [mushafPage, setMushafPage] = useState(() => student?.bookmark ?? 1);
   const meta = useMeta(student?.mushaf ?? "madani");
+  const { account, links } = useSync();
 
   useEffect(() => {
     const root = document.documentElement;
@@ -45,6 +49,9 @@ export function App() {
     window.scrollTo(0, 0);
   }, [tab, nav]);
 
+  // Без входа кабинета нет: вышедший учитель видит обычный первый экран.
+  if (app.role === "teacher" && account?.role === "teacher") return <TeacherApp />;
+
   if (!student || adding) {
     return <Onboarding onDone={() => setAdding(false)} onCancel={student ? () => setAdding(false) : undefined} />;
   }
@@ -58,6 +65,7 @@ export function App() {
       setNav(pending ? { name: "check", kind: "sabak", ranges: [pending] } : null);
     }} />;
   }
+  if (nav?.name === "result") return <ResultScreen student={student} sub={nav.sub} onClose={close} />;
   if (nav?.name === "check" && meta) {
     return (
       <CheckScreen
@@ -68,6 +76,7 @@ export function App() {
         pages={meta.pages}
         lineCount={lineCount}
         onClose={close}
+        link={links.find((l) => l.student === student.id && l.status === "active")}
       />
     );
   }
@@ -98,7 +107,7 @@ export function App() {
       <main>
         {tab === "today" && <TodayScreen student={student} go={setNav} />}
         {tab === "mushaf" && <MushafScreen mushaf={student.mushaf} page={mushafPage} setPage={setMushafPage} />}
-        {tab === "journal" && <JournalScreen student={student} />}
+        {tab === "journal" && <JournalScreen student={student} onOpen={(sub) => setNav({ name: "result", sub })} />}
         {tab === "progress" && (
           <ProgressScreen
             student={student}
@@ -113,8 +122,8 @@ export function App() {
       <nav className="tabs">
         {TABS.map((k) => (
           <button key={k} className={tab === k ? "on" : ""} onClick={() => setTab(k)}>
-            <span className="ico" aria-hidden>
-              {ICONS[k]}
+            <span className="ico">
+              <Icon name={k} />
             </span>
             <span>{t(`tab_${k}` as Key)}</span>
           </button>

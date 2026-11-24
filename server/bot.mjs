@@ -37,8 +37,6 @@ const WELCOME =
   SCHEDULE.map((s) => `${s.at} ${s.text}`).join("\n") +
   "\n\nОтключить напоминания: /stop. Включить снова: /start.";
 
-const openButton = { inline_keyboard: [[{ text: "Открыть", web_app: { url: APP_URL } }]] };
-
 // ---------- Telegram API ----------
 
 async function call(method, body) {
@@ -52,7 +50,8 @@ async function call(method, body) {
   return json.result;
 }
 
-const send = (chat_id, text) => call("sendMessage", { chat_id, text, reply_markup: openButton });
+const button = (url) => ({ inline_keyboard: [[{ text: "Открыть", web_app: { url } }]] });
+const send = (chat_id, text, url = APP_URL) => call("sendMessage", { chat_id, text, reply_markup: button(url) });
 
 // ---------- подписчики ----------
 
@@ -134,7 +133,10 @@ async function onMessage(msg) {
     for (const s of SCHEDULE) if (s.at > time) delete last[s.at];
     subs[chat] = { name: msg.from?.first_name || "", since: date, last };
     await save();
-    await send(chat, WELCOME);
+    // Ссылка учителя: t.me/бот?start=join_КОД. Приложение откроется сразу на записи к нему.
+    const join = text.match(/^\/start join_([A-Z0-9]{6})$/)?.[1];
+    if (join) await send(chat, "Ассаляму алейкум! Учитель зовёт вас в группу. Откройте приложение кнопкой ниже.", `${APP_URL}/?join=${join}`);
+    else await send(chat, WELCOME);
   } else if (text.startsWith("/stop")) {
     delete subs[chat];
     await save();

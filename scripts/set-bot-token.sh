@@ -23,6 +23,6 @@ if ! [[ "$TOKEN" =~ ^[0-9]+:[A-Za-z0-9_-]{30,}$ ]]; then
 fi
 
 printf 'BOT_TOKEN=%s\n' "$TOKEN" | ssh -i "$KEY" -o BatchMode=yes "$HOST" \
-  'sudo mkdir -p /etc/quran && sudo install -m 600 -o root -g root /dev/stdin /etc/quran/bot.env && sudo systemctl restart quran-bot && sleep 3 && sudo journalctl -u quran-bot -n 3 --no-pager -o cat'
+  'sudo mkdir -p /etc/quran && sudo install -m 600 -o root -g root /dev/stdin /etc/quran/bot.env && sudo systemctl restart quran-bot quran-api && sleep 3 && sudo journalctl -u quran-bot -n 3 --no-pager -o cat'
 unset TOKEN
 echo "Токен на сервере. Откройте бота в Telegram и нажмите /start."

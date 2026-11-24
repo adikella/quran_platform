@@ -2,11 +2,13 @@ import { useEffect, useRef, useState } from "react";
 import { PageView, type WordMark } from "../components/PageView";
 import { Recorder } from "../components/Recorder";
 import { fmtDuration, usePages, useSessionTimer, useSurahs, useT } from "../hooks";
-import { gradeFor } from "../method";
-import { versesOfRange } from "../mushaf";
+import { compareVerse, versesOfRange } from "../mushaf";
 import { compareRecitation } from "../recite";
 import { PEEK_SECONDS, SilenceWatch } from "../silence";
+import { Icon } from "../icons";
+import { gradeFor, todayKey } from "../method";
 import { submit } from "../store";
+import { ApiError, loadAudio, sendSubmission, type Link, type RemoteSub, type SubMeta, type VerdictIn } from "../sync";
 import { haptic } from "../telegram";
 import type { LineRange, Student, Submission, SubmissionKind } from "../types";
 
@@ -18,15 +20,19 @@ interface Props {
   pages: number;
   lineCount: (p: number) => number;
   onClose: () => void;
+  /** Ученик записан к учителю: запись можно отправить ему. */
+  link?: Link;
+  /** Проверяет учитель: текст открыт. sub: присланная запись; без неё ученик читает рядом. */
+  review?: { sub?: RemoteSub; onVerdict: (meta: SubMeta, v: VerdictIn) => Promise<void> };
 }
 
 /**
- * Сдача. Наизусть сдают с закрытым текстом: он открывается, когда чтение закончено.
- * Потом ошибки отмечает ИИ, а проверяющий правит: нажатие на слово ставит ошибку,
- * второе: ошибку таджвида (обе снижают оценку), третье убирает.
- * В кабинете учителя (его ещё нет) текст будет открыт, у ученика закрыт.
+ * Сдача. Наизусть сдают с закрытым текстом. Без учителя он открывается, когда чтение закончено,
+ * и ошибки отмечает ИИ, а проверяющий правит. С учителем у ученика текст остаётся закрытым,
+ * запись уходит учителю, а у него в кабинете текст открыт.
+ * Нажатие на слово ставит ошибку, второе: ошибку таджвида (обе снижают оценку), третье убирает.
  */
-export function CheckScreen({ student, kind, ranges, groups, pages, lineCount, onClose }: Props) {
+export function CheckScreen({ student, kind, ranges, groups, pages, lineCount, onClose, link, review }: Props) {
   const t = useT();
   const surahs = useSurahs();
   const { data } = usePages(
@@ -40,13 +46,21 @@ export function CheckScreen({ student, kind, ranges, groups, pages, lineCount, o
   >(null);
   // Назиру читают по мусхафу, остальное сдают наизусть.
   const byHeart = kind !== "nazira";
-  const [open, setOpen] = useState(!byHeart);
+  // Новый урок и чтение у записанного к учителю принимает только учитель; недавнее и давнее можно и самому.
+  const teacherOnly = !review && !!link && (kind === "sabak" || kind === "nazira");
+  const canSend = !review && !!link?.consent;
+  const [open, setOpen] = useState(!byHeart || !!review);
   const [recording, setRecording] = useState(false);
   const [offer, setOffer] = useState(false);
   const [peeking, setPeeking] = useState(false);
   const [peeks, setPeeks] = useState(0);
   const [watch, setWatch] = useState(() => new SilenceWatch());
   const [result, setResult] = useState<Submission | null>(null);
+  const [comment, setComment] = useState("");
+  const [post, setPost] = useState<"idle" | "busy" | "fail" | "big" | "gone" | "sent">("idle");
+  const [url, setUrl] = useState<string | null>(null);
+  const [noAudio, setNoAudio] = useState(false);
+  const remoteAudio = review?.sub?.audio ? review.sub.id : null;
   const timer = useSessionTimer();
   const top = useRef<HTMLDivElement>(null);
   // Номер попытки: ответ ИИ по прежней записи не должен попасть в новую.
@@ -55,6 +69,25 @@ export function CheckScreen({ student, kind, ranges, groups, pages, lineCount, o
   useEffect(() => {
     top.current?.scrollIntoView();
   }, []);
+
+  useEffect(() => {
+    if (!remoteAudio) return;
+    let live = true;
+    let made: string | null = null;
+    loadAudio(remoteAudio).then(
+      (b) => {
+        if (!live) return;
+        made = URL.createObjectURL(b);
+        setAudio(b);
+        setUrl(made);
+      },
+      () => live && setNoAudio(true),
+    );
+    return () => {
+      live = false;
+      if (made) URL.revokeObjectURL(made);
+    };
+  }, [remoteAudio]);
 
   useEffect(() => {
     if (!peeking) return;
@@ -74,9 +107,11 @@ export function CheckScreen({ student, kind, ranges, groups, pages, lineCount, o
     setRecording(on);
     setOffer(false);
     setPeeking(false);
-    setOpen(!byHeart || !on);
+    // Запись, которую увидит учитель, не открывает текст ученику.
+    setOpen(!byHeart || (!on && !canSend));
     if (on) {
       attempt.current++;
+      setPost("idle");
       // Новая попытка: прежние отметки и подсказки относятся к прошлой записи.
       setMarks({});
       setPeeks(0);
@@ -158,47 +193,89 @@ export function CheckScreen({ student, kind, ranges, groups, pages, lineCount, o
     }
   };
 
+  const makeMeta = (): SubMeta | null => {
+    if (!data) return null;
+    const sorted = ranges.flatMap((r, i) => versesOfRange(data[i], r.from, r.to)).sort(compareVerse);
+    return {
+      kind,
+      ranges,
+      fromVerse: sorted[0],
+      toVerse: sorted[sorted.length - 1],
+      date: todayKey(),
+      seconds: Math.round(timer.read()),
+      peeks,
+      groups,
+    };
+  };
+
   const finish = () => {
-    if (!data) return;
-    const spans = ranges.map((r, i) => versesOfRange(data[i], r.from, r.to));
-    const all = spans.flat();
-    const sorted = [...all].sort((a, b) => {
-      const [sa, va] = a.split(":").map(Number);
-      const [sb, vb] = b.split(":").map(Number);
-      return sa - sb || va - vb;
-    });
-    const res = submit(
-      student.id,
-      {
-        kind,
-        ranges,
-        fromVerse: sorted[0],
-        toVerse: sorted[sorted.length - 1],
-        errors,
-        notes,
-        peeks,
-        seconds: Math.round(timer.read()),
-        groups,
-      },
-      pages,
-      lineCount,
-    );
+    const m = makeMeta();
+    if (!m) return;
+    const { date: _date, ...rest } = m;
+    const res = submit(student.id, { ...rest, errors, notes, peeks, seconds: rest.seconds ?? 0 }, pages, lineCount);
     haptic(res.passed ? "success" : "error");
     setResult(res);
   };
+
+  /** Общая отправка: учителю или от учителя. */
+  const deliver = async (job: () => Promise<void>) => {
+    setPost("busy");
+    try {
+      await job();
+      haptic("success");
+      setPost("sent");
+    } catch (e) {
+      haptic("error");
+      const status = e instanceof ApiError ? e.status : 0;
+      setPost(status === 413 ? "big" : status === 404 || status === 409 || status === 403 ? "gone" : "fail");
+    }
+  };
+
+  const send = () => {
+    const m = makeMeta();
+    if (m && audio) void deliver(() => sendSubmission(student.id, m, audio));
+  };
+
+  const judge = () => {
+    const m = makeMeta();
+    if (m && review) void deliver(() => review.onVerdict(m, { marks, ...preview, comment: comment.trim() }));
+  };
+
+  const closedHint = teacherOnly || canSend ? "check_closedTeacher" : "check_closed";
 
   return (
     <div className="screen check" ref={top}>
       <header className="bar-top">
         <button className="ghost small" onClick={onClose}>
-          ← {t("back")}
+          <Icon name="back" size={16} /> {t("back")}
         </button>
-        <span className="muted">{fmtDuration(timer.elapsed)}</span>
+        {!review?.sub && <span className="muted">{fmtDuration(timer.elapsed)}</span>}
       </header>
-      <h2>{t(`check_${kind}` as const)}</h2>
-      <p className="hint">{t(open ? "checkHint" : "check_closed")}</p>
-      {open && <p className="hint muted">{t("aiSoon")}</p>}
+      <h2>
+        {t(`check_${kind}` as const)}
+        {review && `: ${student.name}`}
+      </h2>
+      <p className="hint">{t(review || (open && !teacherOnly) ? "checkHint" : open ? "check_naziraTeacher" : closedHint)}</p>
+      {open && !teacherOnly && audio && <p className="hint muted">{t("aiSoon")}</p>}
+      {review?.sub && (
+        <section className="card">
+          {url ? (
+            <audio controls src={url} className="rec-audio" onError={() => setNoAudio(true)} />
+          ) : (
+            !noAudio && <p className="muted">{t("loading")}</p>
+          )}
+          {noAudio && <p role="alert">{t("review_noAudio")}</p>}
+          {review.sub.peeks ? (
+            <p className="muted">
+              {t("check_peeks")}: {review.sub.peeks}
+            </p>
+          ) : null}
+        </section>
+      )}
+      {teacherOnly && !canSend && <p className="card">{t("check_inPerson")}</p>}
+      {!review && (!teacherOnly || canSend) && (
       <Recorder
+        note={canSend ? t(teacherOnly ? "rec_noteTeacher" : "rec_noteEither") : undefined}
         watch={byHeart ? watch : undefined}
         onSilence={setOffer}
         onRecording={onRecording}
@@ -207,14 +284,25 @@ export function CheckScreen({ student, kind, ranges, groups, pages, lineCount, o
           setAi(null);
         }}
       />
-      {!open && !recording && (
+      )}
+      {canSend && audio && (
+        <section className="send-teacher">
+          <button className="wide" onClick={send} disabled={post === "busy" || !data}>
+            {t(post === "busy" ? "send_busy" : "send_teacher", { name: link!.teacher })}
+          </button>
+        </section>
+      )}
+      {post === "fail" && <p role="alert">{t("send_fail")}</p>}
+      {post === "big" && <p role="alert">{t("send_big")}</p>}
+      {post === "gone" && <p role="alert">{t(review ? "send_goneTeacher" : "send_gone")}</p>}
+      {!open && !recording && !teacherOnly && (
         <button className="ghost" onClick={() => setOpen(true)}>
-          {t("check_open")}
+          {t(canSend && audio ? "check_self" : "check_open")}
         </button>
       )}
-      {audio && (
+      {audio && open && !teacherOnly && (
         <section className="ai-check">
-          <button onClick={checkAi} disabled={ai?.state === "busy" || !data}>
+          <button className={review ? "ghost" : ""} onClick={checkAi} disabled={ai?.state === "busy" || !data}>
             {ai?.state === "busy" ? t("ai_busy") : t("ai_check")}
           </button>
           {ai?.state === "empty" && <p>{t("ai_empty")}</p>}
@@ -249,12 +337,19 @@ export function CheckScreen({ student, kind, ranges, groups, pages, lineCount, o
             hidden={!open}
             peek={peeking}
             marks={marks}
-            onWord={open ? toggle : undefined}
+            onWord={open && !teacherOnly ? toggle : undefined}
           />
         </div>
       ))}
 
-      <div className="check-bar">
+      {review && (
+        <label className="comment">
+          {t("review_comment")}
+          <textarea rows={2} maxLength={500} value={comment} onChange={(e) => setComment(e.target.value)} />
+        </label>
+      )}
+
+      {!(teacherOnly && open) && !(teacherOnly && !canSend) && <div className="check-bar">
         {open ? (
           <>
             <div className="check-sums">
@@ -264,7 +359,7 @@ export function CheckScreen({ student, kind, ranges, groups, pages, lineCount, o
               <span>
                 {t("notes")}: <b className="note-text">{notes}</b>
               </span>
-              {byHeart && (
+              {byHeart && !review && (
                 <span>
                   {t("check_peeks")}: <b>{peeks}</b>
                 </span>
@@ -273,14 +368,20 @@ export function CheckScreen({ student, kind, ranges, groups, pages, lineCount, o
                 {t("grade")}: <b>{preview.grade}</b>
               </span>
             </div>
-            <button onClick={finish} disabled={!data || recording}>
-              {t("finishCheck")}
-            </button>
+            {review ? (
+              <button onClick={judge} disabled={!data || post === "busy"}>
+                {t(post === "busy" ? "send_busy" : preview.passed ? "review_pass" : "review_fail")}
+              </button>
+            ) : (
+              <button onClick={finish} disabled={!data || recording}>
+                {t("finishCheck")}
+              </button>
+            )}
           </>
         ) : (
           <>
             <span className="muted">
-              {peeking ? t("check_peeking") : offer ? t("check_offer") : recording ? t("check_listening") : t("check_start")}
+              {t(peeking ? "check_peeking" : offer ? "check_offer" : recording ? "check_listening" : canSend ? (audio ? "check_sendNow" : "check_startTeacher") : "check_start")}
             </span>
             {offer && (
               <button onClick={peek}>
@@ -289,7 +390,17 @@ export function CheckScreen({ student, kind, ranges, groups, pages, lineCount, o
             )}
           </>
         )}
-      </div>
+      </div>}
+
+      {post === "sent" && (
+        <div className="modal">
+          <div className="modal-card">
+            <h2>{t(review ? "review_sent" : "send_done")}</h2>
+            <p className="muted">{review ? t("review_sentNote", { name: student.name }) : t("send_doneNote", { name: link?.teacher ?? "" })}</p>
+            <button onClick={onClose}>{t("close")}</button>
+          </div>
+        </div>
+      )}
 
       {result && (
         <div className="modal">

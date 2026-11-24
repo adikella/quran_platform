@@ -885,3 +885,231 @@ button.sticky-cta {
   border-radius: 10px;
   padding: 10px;
 }
+
+/* ---------- вход, учитель, кабинет ---------- */
+textarea {
+  font: inherit;
+  color: var(--text);
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+  width: 100%;
+  resize: vertical;
+}
+:where(button, summary, input, select, textarea):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.tabs .ico {
+  position: relative;
+  display: inline-flex;
+}
+.tabs.tabs-3 {
+  grid-template-columns: repeat(3, 1fr);
+}
+.count {
+  position: absolute;
+  inset-block-start: -5px;
+  inset-inline-start: 15px;
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 99px;
+  background: var(--bad);
+  color: #fff;
+  font-size: 11px;
+  line-height: 18px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.icon {
+  flex: none;
+  vertical-align: -0.2em;
+}
+[dir="rtl"] .icon-back {
+  transform: scaleX(-1);
+}
+.app.no-tabs {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.pill.wait {
+  background: color-mix(in srgb, var(--note) 18%, transparent);
+  color: color-mix(in srgb, var(--note) 60%, var(--text));
+}
+.pill.none {
+  background: var(--c-none);
+  color: var(--muted);
+  font-weight: 500;
+}
+.code-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.code-form p,
+.request p {
+  margin: 0;
+}
+.code-input {
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-variant-numeric: tabular-nums;
+}
+.code-box {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 14px;
+  margin: 4px 0 10px;
+}
+.code-box b {
+  font-size: 30px;
+  letter-spacing: 0.08em;
+  font-variant-numeric: tabular-nums;
+  user-select: all;
+  -webkit-user-select: all;
+}
+details.more {
+  margin-top: 10px;
+}
+details.more > summary {
+  cursor: pointer;
+  padding: 8px 0;
+  color: var(--accent);
+}
+.join-field {
+  margin-top: 12px;
+}
+label.consent {
+  align-items: flex-start;
+  color: var(--text);
+  margin: 4px 0 12px;
+}
+label.consent input {
+  margin-top: 3px;
+  flex: none;
+}
+button.link.inline {
+  display: block;
+  padding: 4px 0;
+  font-size: inherit;
+  text-align: start;
+}
+.from-teacher p {
+  margin: 10px 0 0;
+}
+.said {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: 0;
+}
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  background: var(--card);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.list li + li {
+  border-top: 1px solid var(--line);
+}
+.list-row {
+  width: 100%;
+  background: none;
+  color: var(--text);
+  font-weight: 400;
+  text-align: start;
+  border-radius: 0;
+  padding: 14px 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+}
+.list-row:hover {
+  background: var(--soft);
+}
+.list-row.col {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+}
+.list-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.list-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+}
+.list-row b {
+  font-size: 17px;
+  overflow-wrap: anywhere;
+}
+.list-row .muted {
+  font-size: 13px;
+  white-space: nowrap;
+}
+.marks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.request {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+}
+.request .row > button {
+  flex: 0 0 auto;
+}
+.empty {
+  padding: 48px 8px;
+  text-align: center;
+  font-size: 18px;
+}
+.pupil-now {
+  font-size: 18px;
+  margin: 0;
+}
+.hear {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.hear button {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  text-align: start;
+}
+.hear button span {
+  font-weight: 400;
+}
+.switch {
+  display: flex;
+  gap: 20px;
+  border-bottom: 1px solid var(--line);
+}
+.switch button {
+  background: none;
+  color: var(--muted);
+  border-radius: 0;
+  padding: 10px 0;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.switch button.on {
+  color: var(--text);
+  border-color: var(--accent);
+}

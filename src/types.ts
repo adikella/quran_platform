@@ -82,6 +82,11 @@ export interface Submission {
   grade: number;
   passed: boolean;
   seconds: number;
+  /** Принимал учитель. */
+  by?: "teacher";
+  /** Отметки учителя по словам: ключ «страница:строка:слово», 1 ошибка, 2 таджвид. */
+  marks?: Record<string, 1 | 2>;
+  comment?: string;
 }
 
 export interface DayStats {
@@ -116,6 +121,8 @@ export interface Student {
   submissions: Submission[];
   /** Страница, отмеченная закладкой в мусхафе. */
   bookmark?: number;
+  /** Когда ученика меняли в последний раз (мс): по этому числу видно, что надо отправить на сервер. */
+  updatedAt?: number;
   days: Record<string, DayStats>;
 }
 
@@ -128,6 +135,8 @@ export interface AppState {
   lang: Lang;
   /** Оформление: как в системе или в Telegram (auto), светлое или тёмное. */
   theme?: Theme;
+  /** Чем сейчас занят человек: учится или ведёт группу. */
+  role?: "student" | "teacher";
   students: Student[];
   activeId: string | null;
 }

@@ -1,8 +1,8 @@
-// Состояние приложения. Пока всё хранится на устройстве (localStorage);
-// синхронизация через сервер появится вместе с ИИ-проверкой.
+// Состояние приложения на устройстве (localStorage). Обмен с сервером: sync.ts.
 
 import { useSyncExternalStore } from "react";
-import { DEFAULT_METHOD, gradeFor, nextLessonRange, stepPage, todayKey } from "./method";
+import { settle } from "./merge";
+import { DEFAULT_METHOD, gradeFor, nextLessonRange, todayKey } from "./method";
 import type {
   AppState,
   DayStats,
@@ -94,7 +94,44 @@ function uid() {
 }
 
 function updateStudent(id: string, fn: (s: Student) => Student) {
-  set({ ...state, students: state.students.map((s) => (s.id === id ? fn(s) : s)) });
+  set({
+    ...state,
+    students: state.students.map((s) => {
+      if (s.id !== id) return s;
+      const next = fn(s);
+      return next === s ? s : { ...next, updatedAt: Date.now() };
+    }),
+  });
+}
+
+/** Любое изменение состояния (для синхронизации). */
+export function subscribe(cb: () => void): () => void {
+  listeners.add(cb);
+  return () => listeners.delete(cb);
+}
+
+/** Положить ученика с сервера как есть, не помечая изменённым. */
+export function adoptStudent(st: Student) {
+  const doc: Student = { ...st, method: { ...DEFAULT_METHOD, ...st.method } };
+  const known = state.students.some((s) => s.id === doc.id);
+  const students = known ? state.students.map((s) => (s.id === doc.id ? doc : s)) : [...state.students, doc];
+  set({ ...state, students, activeId: state.activeId ?? doc.id });
+}
+
+/** Изменить ученика (решение учителя). */
+export function changeStudent(id: string, fn: (s: Student) => Student) {
+  updateStudent(id, fn);
+}
+
+/** Ученика удалили на сервере, а потом вернули из копии: он становится новым. */
+export function renewStudent(id: string) {
+  const fresh = uid();
+  const students = state.students.map((s) => (s.id === id ? { ...s, id: fresh } : s));
+  set({ ...state, students, activeId: state.activeId === id ? fresh : state.activeId });
+}
+
+export function setRole(role: "student" | "teacher") {
+  set({ ...state, role });
 }
 
 function day(s: Student, date = todayKey()): DayStats {
@@ -151,13 +188,15 @@ export function addStudent(n: NewStudent) {
     },
     submissions: [],
     days: {},
+    updatedAt: Date.now(),
   };
   set({ ...state, students: [...state.students, st], activeId: st.id });
+  return st.id;
 }
 
 export function removeStudent(id: string) {
   const students = state.students.filter((s) => s.id !== id);
-  set({ ...state, students, activeId: students[0]?.id ?? null });
+  set({ ...state, students, activeId: state.activeId === id ? (students[0]?.id ?? null) : state.activeId });
 }
 
 export function patchStudent(id: string, patch: Partial<Pick<Student, "name" | "volume" | "direction" | "method" | "stage">>) {
@@ -261,32 +300,7 @@ export function submit(id: string, r: CheckResult, pages: number, lineCount: (p:
     const { grade, passed } = gradeFor(r.errors + r.notes, s.method.maxErrors);
     const { groups, ...rest } = r;
     saved = { id: uid(), date: todayKey(), grade, passed, ...rest };
-    let next: Student = { ...s, submissions: [...s.submissions, saved] };
-
-    if (passed && r.kind === "nazira") {
-      const page = r.ranges[0].page;
-      const read = next.nazira.read.includes(page) ? next.nazira.read : [...next.nazira.read, page];
-      next = { ...next, nazira: { next: Math.min(page + 1, pages), read } };
-    }
-
-    if (passed && r.kind === "sabak" && next.hifz.pending) {
-      const p = next.hifz.pending;
-      const h = { ...next.hifz, pending: null };
-      if (p.to >= lineCount(p.page)) {
-        h.memorized = h.memorized.includes(p.page) ? h.memorized : [...h.memorized, p.page];
-        let np = stepPage(p.page, next.direction, pages);
-        while (np !== null && h.memorized.includes(np)) np = stepPage(np, next.direction, pages);
-        h.cur = { page: np ?? p.page, line: np === null ? lineCount(p.page) : 0 };
-      } else {
-        h.cur = { page: p.page, line: p.to };
-      }
-      next = { ...next, hifz: h };
-    }
-
-    if (passed && r.kind === "manzil") {
-      next = { ...next, hifz: { ...next.hifz, manzilCursor: next.hifz.manzilCursor + (groups ?? 1) } };
-    }
-    return withDay(next, (d) => ({ ...d, seconds: { ...d.seconds, [r.kind]: (d.seconds[r.kind] ?? 0) + r.seconds } }));
+    return settle(s, saved, groups, pages, lineCount);
   });
   return saved;
 }

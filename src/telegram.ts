@@ -47,3 +47,12 @@ export function haptic(kind: "tap" | "success" | "error" = "tap") {
     }
   }
 }
+
+/** Подписанные данные для входа на сервер; вне Telegram undefined. */
+export function telegramInitData(): string | undefined {
+  return ((window as any).Telegram?.WebApp?.initData as string | undefined) || undefined;
+}
+
+export function telegramUserId(): number | undefined {
+  return inTelegram ? ((window as any).Telegram.WebApp.initDataUnsafe?.user?.id as number | undefined) : undefined;
+}

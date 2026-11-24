@@ -1,17 +1,20 @@
-import { useRef } from "react";
+import { useRef, useState } from "react";
+import { AccountCard, useJob } from "../components/AccountCard";
 import { InstallCard } from "../components/InstallCard";
+import { TeacherCard } from "../components/TeacherCard";
 import { LANG_NAMES, type Key } from "../i18n";
 import { useT } from "../hooks";
 import {
   exportJson,
   importJson,
   patchStudent,
-  removeStudent,
   setActive,
   setLang,
+  setRole,
   setTheme,
   useAppState,
 } from "../store";
+import { becomeTeacher, deleteStudent, useSync } from "../sync";
 import type { Lang, Method, Stage, Student, Theme, Volume } from "../types";
 
 const NUMBER_FIELDS: (keyof Method)[] = [
@@ -47,6 +50,8 @@ export function SettingsScreen({ student, onAddStudent }: { student: Student; on
 
   return (
     <div className="screen">
+      <TeacherCard key={student.id} student={student} />
+      <AccountCard name={student.name} />
       <InstallCard />
       <section className="card">
         <label>
@@ -78,7 +83,7 @@ export function SettingsScreen({ student, onAddStudent }: { student: Student; on
             <button key={s.id} className={`choice ${s.id === student.id ? "on" : ""}`} onClick={() => setActive(s.id)}>
               <b>{s.name}</b>
               <span className="muted">
-                {t(s.mushaf)} · {t(`stage_${s.stage}` as const)}
+                {t(s.mushaf)}, {t(`stage_${s.stage}` as const)}
               </span>
             </button>
           ))}
@@ -156,6 +161,8 @@ export function SettingsScreen({ student, onAddStudent }: { student: Student; on
         </label>
       </section>
 
+      <TeacherEntry />
+
       <section className="card">
         <h3>{t("data")}</h3>
         <div className="row">
@@ -185,7 +192,7 @@ export function SettingsScreen({ student, onAddStudent }: { student: Student; on
         <button
           className="link danger"
           onClick={() => {
-            if (confirm(t("confirmReset"))) removeStudent(student.id);
+            if (confirm(t("confirmReset"))) deleteStudent(student.id);
           }}
         >
           {t("resetStudent")}
@@ -194,5 +201,36 @@ export function SettingsScreen({ student, onAddStudent }: { student: Student; on
 
       <p className="muted small-print">{t("sources")}</p>
     </div>
+  );
+}
+
+/** Вход в кабинет учителя с того же телефона, где человек учится сам. */
+function TeacherEntry() {
+  const t = useT();
+  const { account } = useSync();
+  const [name, setName] = useState(account?.name ?? "");
+  const { busy, failed, job } = useJob();
+  return (
+    <section className="card form">
+      <h3>{t("cab_title")}</h3>
+      {account?.role === "teacher" ? (
+        <button className="ghost" onClick={() => setRole("teacher")}>
+          {t("cab_open")}
+        </button>
+      ) : (
+        <details className="more">
+          <summary>{t("cab_become")}</summary>
+          <label>
+            {t("cab_name")}
+            <input value={name} maxLength={80} onChange={(e) => setName(e.target.value)} />
+          </label>
+          <p className="muted small-note">{t("cab_becomeNote")}</p>
+          {failed && <p role="alert">{t("net_fail")}</p>}
+          <button disabled={busy || !name.trim()} onClick={() => job(() => becomeTeacher(name))}>
+            {t("cab_open")}
+          </button>
+        </details>
+      )}
+    </section>
   );
 }

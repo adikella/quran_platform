@@ -10,6 +10,10 @@ export default defineConfig({
     host: true,
     allowedHosts: [".trycloudflare.com"],
     // Распознавание чтения работает на сервере: в разработке ходим туда же.
-    proxy: { "/api": { target: "https://130-61-147-45.sslip.io", changeOrigin: true } },
+    // Аккаунты в разработке можно направить на свой сервер: API_TARGET=http://127.0.0.1:8091 npm run dev
+    proxy: {
+      "/api/asr": { target: "https://130-61-147-45.sslip.io", changeOrigin: true },
+      "/api": { target: process.env.API_TARGET ?? "https://130-61-147-45.sslip.io", changeOrigin: true },
+    },
   },
 });

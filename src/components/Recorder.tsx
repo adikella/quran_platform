@@ -10,11 +10,10 @@ function pickMime(): string | undefined {
   return ["audio/webm;codecs=opus", "audio/mp4", "audio/webm"].find((m) => MediaRecorder.isTypeSupported(m));
 }
 
-/**
- * Запись чтения с микрофона. Пока запись остаётся на устройстве: её можно прослушать.
- * Дальше её будет получать устаз или ИИ-проверка (см. ИИ-ПРОВЕРКА.md).
- */
+/** Запись чтения с микрофона. Остаётся на устройстве, пока ученик сам не отправит её ИИ или учителю. */
 interface Props {
+  /** Подпись под записью: куда она попадёт. */
+  note?: string;
   onAudio?: (blob: Blob | null) => void;
   /** Запись началась или закончилась. */
   onRecording?: (on: boolean) => void;
@@ -54,7 +53,7 @@ function meter(stream: MediaStream, onLevel: (rms: number, dt: number) => void):
   }
 }
 
-export function Recorder({ onAudio, onRecording, watch, onSilence }: Props) {
+export function Recorder({ note, onAudio, onRecording, watch, onSilence }: Props) {
   const t = useT();
   const [status, setStatus] = useState<Status>(() =>
     typeof navigator.mediaDevices?.getUserMedia === "function" && typeof MediaRecorder !== "undefined" ? "idle" : "unsupported",
@@ -89,7 +88,7 @@ export function Recorder({ onAudio, onRecording, watch, onSilence }: Props) {
       stream.current = s;
       chunks.current = [];
       const mime = pickMime();
-      const r = new MediaRecorder(s, mime ? { mimeType: mime } : undefined);
+      const r = new MediaRecorder(s, { mimeType: mime, audioBitsPerSecond: 48000 });
       r.ondataavailable = (e) => e.data.size && chunks.current.push(e.data);
       r.onstop = () => {
         stopMeter.current();
@@ -157,7 +156,7 @@ export function Recorder({ onAudio, onRecording, watch, onSilence }: Props) {
           </button>
         </>
       )}
-      {(status === "idle" || status === "done") && <p className="muted small-note">{t("rec_note")}</p>}
+      {(status === "idle" || status === "done") && <p className="muted small-note">{note ?? t("rec_note")}</p>}
     </section>
   );
 }

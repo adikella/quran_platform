@@ -1,0 +1,24 @@
+[Unit]
+Description=Quran platform accounts, progress and submissions
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=quran-api
+WorkingDirectory=/opt/quran-api
+# Токен бота нужен, чтобы проверять вход из Telegram и сообщать о сдачах. Файл читает только root.
+EnvironmentFile=-/etc/quran/bot.env
+Environment=API_DATA=/var/lib/quran-api
+ExecStart=/opt/quran-api/venv/bin/uvicorn api:app --app-dir /opt/quran-api --host 127.0.0.1 --port 8091 --workers 1 --no-access-log
+Restart=always
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/quran-api
+PrivateTmp=true
+MemoryMax=2G
+
+[Install]
+WantedBy=multi-user.target

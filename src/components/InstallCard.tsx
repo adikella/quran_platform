@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { useT } from "../hooks";
+import { useSync } from "../sync";
+import { LoginCode } from "./AccountCard";
 import { promptInstall, useInstallWay } from "../install";
 import { exportJson } from "../store";
 import { haptic, tg } from "../telegram";
@@ -18,6 +20,7 @@ function hidden() {
 export function InstallCard({ dismissible }: { dismissible?: boolean }) {
   const t = useT();
   const way = useInstallWay();
+  const { account } = useSync();
   const [gone, setGone] = useState(hidden);
   const [failed, setFailed] = useState(false);
   const [copied, setCopied] = useState<"ok" | "fail" | null>(null);
@@ -63,11 +66,14 @@ export function InstallCard({ dismissible }: { dismissible?: boolean }) {
       {inTg && (
         <details open={viaBrowser}>
           <summary>{t("install_computer")}</summary>
-          <p className="muted">{t("install_transfer")}</p>
+          <p className="muted">{t(account ? "install_code" : "install_transfer")}</p>
+          {account && <LoginCode />}
           <div className="row">
-            <button className="ghost" onClick={copy}>
-              {t("install_copy")}
-            </button>
+            {!account && (
+              <button className="ghost" onClick={copy}>
+                {t("install_copy")}
+              </button>
+            )}
             <button className="ghost" onClick={() => tg?.openLink?.(location.origin + location.pathname)}>
               {t("install_open")}
             </button>

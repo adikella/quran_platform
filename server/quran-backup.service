@@ -1,0 +1,11 @@
+[Unit]
+Description=Nightly copy of the Quran platform database
+
+[Service]
+Type=oneshot
+# От имени службы: иначе рядом с базой могли бы появиться файлы root, и служба бы не запустилась.
+User=quran-api
+ExecStartPre=+/usr/bin/install -d -m 700 -o quran-api -g quran-api /var/backups/quran
+ProtectSystem=strict
+ReadWritePaths=/var/lib/quran-api /var/backups
+ExecStart=/opt/quran-api/backup.sh

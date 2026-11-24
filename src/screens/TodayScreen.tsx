@@ -1,15 +1,19 @@
-import { InstallCard } from "../components/InstallCard";
 import { useState } from "react";
+import { InstallCard } from "../components/InstallCard";
+import { TeacherCard } from "../components/TeacherCard";
 import { useMeta, useNow, usePages, useSurahs, useT } from "../hooks";
 import { dayPart, naziraTargetPages, nextLessonRange, revision, todayKey } from "../method";
 import { verseSpanLabel, versesOfRange } from "../mushaf";
 import { beginLesson, lessonReps, startHifz, useAppState } from "../store";
+import { useJob } from "../components/AccountCard";
+import { useSync, withdrawSubmission } from "../sync";
 import type { Key } from "../i18n";
-import type { LineRange, MushafMeta, Student, SubmissionKind } from "../types";
+import type { LineRange, MushafMeta, Student, Submission, SubmissionKind } from "../types";
 
 export type Nav =
   | { name: "lesson" }
   | { name: "check"; kind: SubmissionKind; ranges: LineRange[]; groups?: number }
+  | { name: "result"; sub: Submission }
   | { name: "read"; kind: SubmissionKind; ranges: LineRange[]; groups?: number };
 
 interface Props {
@@ -23,7 +27,7 @@ export function rangeText(r: LineRange, lineCount: number, t: ReturnType<typeof 
 }
 
 /** «Стр. 63, 1–4 · Стр. 53–62»: подряд идущие целые страницы сворачиваются в диапазон. */
-function rangesText(ranges: LineRange[], lineCount: (p: number) => number, t: ReturnType<typeof useT>) {
+export function rangesText(ranges: LineRange[], lineCount: (p: number) => number, t: ReturnType<typeof useT>) {
   const parts: string[] = [];
   let run: number[] = [];
   const flush = () => {
@@ -43,7 +47,7 @@ function rangesText(ranges: LineRange[], lineCount: (p: number) => number, t: Re
     }
   }
   flush();
-  return parts.join(" · ");
+  return parts.join("; ");
 }
 
 function lastToday(s: Student, kind: SubmissionKind) {
@@ -54,20 +58,59 @@ function lastToday(s: Student, kind: SubmissionKind) {
 function Status({ s, kind }: { s: Student; kind: SubmissionKind }) {
   const t = useT();
   const sub = lastToday(s, kind);
+  const { waiting } = useSync();
+  if (waiting.some((w) => w.student === s.id && w.kind === kind)) return <span className="pill wait">{t("wait_pill")}</span>;
   if (!sub) return null;
   return (
     <span className={`pill ${sub.passed ? "ok" : "bad"}`}>
-      {sub.passed ? t("doneToday") : t("retakeToday")} · {sub.grade}
+      {sub.passed ? t("doneToday") : t("retakeToday")}: {sub.grade}
     </span>
+  );
+}
+
+/** Сдача у учителя: ждёт проверки (можно забрать назад) или последнее его решение с отметками. */
+function FromTeacher({ s, kind, go }: { s: Student; kind: SubmissionKind; go: Props["go"] }) {
+  const t = useT();
+  const { waiting, links } = useSync();
+  const { busy, failed, job } = useJob();
+  const mine = waiting.find((w) => w.student === s.id && w.kind === kind);
+  if (mine) {
+    return (
+      <div className="from-teacher">
+        <p className="muted">{t("wait_note", { name: links.find((l) => l.student === s.id)?.teacher ?? "" })}</p>
+        {failed && <p role="alert">{t("net_fail")}</p>}
+        <button className="link" disabled={busy} onClick={() => job(() => withdrawSubmission(mine.id))}>
+          {t("wait_withdraw")}
+        </button>
+      </div>
+    );
+  }
+  const last = [...s.submissions].reverse().find((x) => x.kind === kind);
+  if (last?.by !== "teacher" || !(last.marks || last.comment)) return null;
+  // Вчерашнее принятое показывать незачем, а несданное висит до пересдачи.
+  if (last.passed && last.date !== todayKey()) return null;
+  return (
+    <div className="from-teacher">
+      <button className="link" onClick={() => go({ name: "result", sub: last })}>
+        {t("result_open")}
+      </button>
+    </div>
   );
 }
 
 export function TodayScreen({ student, go }: Props) {
   const t = useT();
   const meta = useMeta(student.mushaf);
+  const { joinCode, links } = useSync();
+  const link = links.find((l) => l.student === student.id);
   if (!meta) return <p className="muted pad">{t("loading")}</p>;
   return (
     <>
+      {((joinCode && !link) || link?.status === "pending") && (
+        <div className="screen">
+          <TeacherCard student={student} />
+        </div>
+      )}
       {student.stage === "nazira" ? <Nazira s={student} meta={meta} go={go} /> : <Hifz s={student} meta={meta} go={go} />}
       <div className="screen">
         <InstallCard dismissible />
@@ -119,6 +162,7 @@ function Nazira({ s, meta, go }: { s: Student; meta: MushafMeta; go: Props["go"]
           </button>
           <button onClick={() => go({ name: "check", kind: "nazira", ranges: [range] })}>{t("naziraSubmit")}</button>
         </div>
+        <FromTeacher s={s} kind="nazira" go={go} />
       </section>
 
       <section className="card">
@@ -248,6 +292,7 @@ function Hifz({ s, meta, go }: { s: Student; meta: MushafMeta; go: Props["go"] }
         ) : (
           <p className="muted">{t("nothingYet")}</p>
         )}
+        <FromTeacher s={s} kind="sabak" go={go} />
       </section>
 
       <div className="block-label">{t("morningBlock", { a: m.morningStart, b: m.morningEnd })}</div>
@@ -285,6 +330,7 @@ function Hifz({ s, meta, go }: { s: Student; meta: MushafMeta; go: Props["go"] }
         ) : (
           <p className="muted">{t("nothingYet")}</p>
         )}
+        <FromTeacher s={s} kind="sabki" go={go} />
       </section>
 
       <section className="card">
@@ -324,6 +370,7 @@ function Hifz({ s, meta, go }: { s: Student; meta: MushafMeta; go: Props["go"] }
         ) : (
           <p className="muted">{t("nothingYet")}</p>
         )}
+        <FromTeacher s={s} kind="manzil" go={go} />
       </section>
 
       <div className="block-label">{t("afterMorning", { b: m.morningEnd })}</div>
