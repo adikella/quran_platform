@@ -1,4 +1,5 @@
 import { useRef } from "react";
+import { InstallCard } from "../components/InstallCard";
 import { LANG_NAMES, type Key } from "../i18n";
 import { useT } from "../hooks";
 import {
@@ -46,6 +47,7 @@ export function SettingsScreen({ student, onAddStudent }: { student: Student; on
 
   return (
     <div className="screen">
+      <InstallCard />
       <section className="card">
         <label>
           {t("chooseLang")}

@@ -16,7 +16,10 @@ function SubLine({ sub }: { sub: Submission }) {
   const t = useT();
   return (
     <div className="sub-line">
-      <span>{verseSpanLabel(sub.fromVerse, sub.toVerse, surahs, lang)}</span>
+      <span>
+        {verseSpanLabel(sub.fromVerse, sub.toVerse, surahs, lang)}
+        {sub.peeks ? <span className="muted"> ({t("check_peeks")}: {sub.peeks})</span> : null}
+      </span>
       <span className={`pill ${sub.passed ? "ok" : "bad"}`}>
         {sub.grade}
         {!sub.passed && ` · ${t("retake")}`}

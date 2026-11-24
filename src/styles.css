@@ -855,3 +855,33 @@ button.sticky-cta {
   line-height: 1.8;
   margin: 8px 0 0;
 }
+/* ---------- сдача наизусть ---------- */
+.check .line.covered {
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.check .line.covered .w,
+.check .line.covered .ayah-end {
+  filter: blur(16px);
+}
+.check-sums {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+}
+.install summary,
+.transfer summary {
+  cursor: pointer;
+  padding: 6px 0;
+}
+.transfer textarea {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px;
+}

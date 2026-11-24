@@ -58,3 +58,39 @@ describe("огласовка конца слова", () => {
     expect(r.words.every((w) => w.status === "ok")).toBe(true);
   });
 });
+
+describe("орфография мусхафа и обычная", () => {
+  it.each([
+    ["هَٰذَا", "هذا"],
+    ["ٱلصَّلَوٰةَ", "الصلاة"],
+    ["ٱلسَّمَٰوَٰتِ", "السماوات"],
+    ["يَـُٔودُهُۥ", "يئوده"],
+    ["عَلَىٰ", "على"],
+  ])("%s и %s одно слово", (a, b) => expect(similarity(a, b)).toBeGreaterThanOrEqual(SAME_WORD));
+  it.each([
+    ["هُوَ", "هي"],
+    ["قَالَ", "قيل"],
+    ["وَلَا", "لا"],
+    ["مَا", "من"],
+  ])("%s и %s разные слова", (a, b) => expect(similarity(a, b)).toBeLessThan(SAME_WORD));
+  it("слитно и раздельно", () => {
+    const r = compareRecitation(["يَٰٓأَيُّهَا", "ٱلنَّاسُ"], "يا أيها الناس");
+    expect(r.words.every((w) => w.status === "ok")).toBe(true);
+    expect(r.extra).toBe(0);
+  });
+  it("слияние не прячет пропущенное слово", () => {
+    const r = compareRecitation(["ٱلَّذِينَ", "هُمۡ", "فِي"], "الذين في");
+    expect(r.words.map((w) => w.status)).toEqual(["ok", "missed", "ok"]);
+  });
+});
+
+describe("васль", () => {
+  it("لَا ٱنفِصَامَ, услышанное как «لن فصام», не ошибка", () => {
+    const r = compareRecitation(["ٱلۡوُثۡقَىٰ", "لَا", "ٱنفِصَامَ", "لَهَاۗ"], "الْوُثْقَى لَنْ فِصَامَ لَهَا");
+    expect(r.words.every((w) => w.status === "ok")).toBe(true);
+  });
+  it("другое слово перед васлем остаётся ошибкой", () => {
+    const r = compareRecitation(["قَالَ", "ٱللَّهُ"], "قل الله");
+    expect(r.words[0].status).toBe("wrong");
+  });
+});

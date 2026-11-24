@@ -249,6 +249,7 @@ export interface CheckResult {
   toVerse: string;
   errors: number;
   notes: number;
+  peeks?: number;
   seconds: number;
   /** Сколько групп (джузов) манзиля сдано. */
   groups?: number;

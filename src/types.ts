@@ -77,6 +77,8 @@ export interface Submission {
   toVerse: string;
   errors: number;
   notes: number;
+  /** Сколько раз подсмотрел при долгом молчании (в оценку не идёт). */
+  peeks?: number;
   grade: number;
   passed: boolean;
   seconds: number;

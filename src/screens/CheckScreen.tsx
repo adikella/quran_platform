@@ -5,6 +5,7 @@ import { fmtDuration, usePages, useSessionTimer, useSurahs, useT } from "../hook
 import { gradeFor } from "../method";
 import { versesOfRange } from "../mushaf";
 import { compareRecitation } from "../recite";
+import { PEEK_SECONDS, SilenceWatch } from "../silence";
 import { submit } from "../store";
 import { haptic } from "../telegram";
 import type { LineRange, Student, Submission, SubmissionKind } from "../types";
@@ -20,8 +21,10 @@ interface Props {
 }
 
 /**
- * Сдача. Пока ИИ-проверки нет, проверяющий нажимает на слова с ошибками:
- * один раз — явная ошибка, второй — замечание по таджвиду (в оценку не идёт), третий — убрать.
+ * Сдача. Наизусть сдают с закрытым текстом: он открывается, когда чтение закончено.
+ * Потом ошибки отмечает ИИ, а проверяющий правит: нажатие на слово ставит ошибку,
+ * второе: ошибку таджвида (обе снижают оценку), третье убирает.
+ * В кабинете учителя (его ещё нет) текст будет открыт, у ученика закрыт.
  */
 export function CheckScreen({ student, kind, ranges, groups, pages, lineCount, onClose }: Props) {
   const t = useT();
@@ -33,15 +36,52 @@ export function CheckScreen({ student, kind, ranges, groups, pages, lineCount, o
   const [marks, setMarks] = useState<Record<string, WordMark>>({});
   const [audio, setAudio] = useState<Blob | null>(null);
   const [ai, setAi] = useState<
-    { state: "busy" } | { state: "fail" } | { state: "done"; text: string; missed: number; wrong: number; vowel: number } | null
+    { state: "busy" } | { state: "fail" } | { state: "long" } | { state: "empty" } | { state: "done"; text: string; missed: number; wrong: number; vowel: number } | null
   >(null);
+  // Назиру читают по мусхафу, остальное сдают наизусть.
+  const byHeart = kind !== "nazira";
+  const [open, setOpen] = useState(!byHeart);
+  const [recording, setRecording] = useState(false);
+  const [offer, setOffer] = useState(false);
+  const [peeking, setPeeking] = useState(false);
+  const [peeks, setPeeks] = useState(0);
+  const [watch, setWatch] = useState(() => new SilenceWatch());
   const [result, setResult] = useState<Submission | null>(null);
   const timer = useSessionTimer();
   const top = useRef<HTMLDivElement>(null);
+  // Номер попытки: ответ ИИ по прежней записи не должен попасть в новую.
+  const attempt = useRef(0);
 
   useEffect(() => {
     top.current?.scrollIntoView();
   }, []);
+
+  useEffect(() => {
+    if (!peeking) return;
+    const id = setTimeout(() => setPeeking(false), PEEK_SECONDS * 1000);
+    return () => clearTimeout(id);
+  }, [peeking]);
+
+  const peek = () => {
+    haptic("tap");
+    watch.used();
+    setOffer(false);
+    setPeeks((n) => n + 1);
+    setPeeking(true);
+  };
+
+  const onRecording = (on: boolean) => {
+    setRecording(on);
+    setOffer(false);
+    setPeeking(false);
+    setOpen(!byHeart || !on);
+    if (on) {
+      attempt.current++;
+      // Новая попытка: прежние отметки и подсказки относятся к прошлой записи.
+      setMarks({});
+      setPeeks(0);
+    } else setWatch(new SilenceWatch());
+  };
 
   const errors = Object.values(marks).filter((m) => m === 1).length;
   const notes = Object.values(marks).filter((m) => m === 2).length;
@@ -64,12 +104,24 @@ export function CheckScreen({ student, kind, ranges, groups, pages, lineCount, o
   const checkAi = async () => {
     if (!audio || !data) return;
     setAi({ state: "busy" });
+    const mine = attempt.current;
     try {
       const form = new FormData();
       form.append("audio", audio, "recitation");
       const res = await fetch("./api/asr", { method: "POST", body: form });
+      if (mine !== attempt.current) return;
+      if (res.status === 413) {
+        setAi({ state: "long" });
+        return;
+      }
       if (!res.ok) throw new Error(String(res.status));
       const { text } = (await res.json()) as { text: string };
+      if (mine !== attempt.current) return;
+      if (!text) {
+        // Тишина: иначе вся страница оказалась бы пропущенной.
+        setAi({ state: "empty" });
+        return;
+      }
       // Слова мусхафа по порядку, с ключами как в PageView и признаком конца аята.
       const keys: string[] = [];
       const words: string[] = [];
@@ -100,6 +152,7 @@ export function CheckScreen({ student, kind, ranges, groups, pages, lineCount, o
       setAi({ state: "done", text, ...count });
       haptic("success");
     } catch {
+      if (mine !== attempt.current) return;
       setAi({ state: "fail" });
       haptic("error");
     }
@@ -123,6 +176,7 @@ export function CheckScreen({ student, kind, ranges, groups, pages, lineCount, o
         toVerse: sorted[sorted.length - 1],
         errors,
         notes,
+        peeks,
         seconds: Math.round(timer.read()),
         groups,
       },
@@ -142,17 +196,29 @@ export function CheckScreen({ student, kind, ranges, groups, pages, lineCount, o
         <span className="muted">{fmtDuration(timer.elapsed)}</span>
       </header>
       <h2>{t(`check_${kind}` as const)}</h2>
-      <p className="hint">{t("checkHint")}</p>
-      <p className="hint muted">{t("aiSoon")}</p>
-      <Recorder onAudio={(b) => {
-        setAudio(b);
-        setAi(null);
-      }} />
+      <p className="hint">{t(open ? "checkHint" : "check_closed")}</p>
+      {open && <p className="hint muted">{t("aiSoon")}</p>}
+      <Recorder
+        watch={byHeart ? watch : undefined}
+        onSilence={setOffer}
+        onRecording={onRecording}
+        onAudio={(b) => {
+          setAudio(b);
+          setAi(null);
+        }}
+      />
+      {!open && !recording && (
+        <button className="ghost" onClick={() => setOpen(true)}>
+          {t("check_open")}
+        </button>
+      )}
       {audio && (
         <section className="ai-check">
           <button onClick={checkAi} disabled={ai?.state === "busy" || !data}>
             {ai?.state === "busy" ? t("ai_busy") : t("ai_check")}
           </button>
+          {ai?.state === "empty" && <p>{t("ai_empty")}</p>}
+          {ai?.state === "long" && <p>{t("ai_long")}</p>}
           {ai?.state === "fail" && <p className="muted">{t("ai_fail")}</p>}
           {ai?.state === "done" && (
             <>
@@ -180,20 +246,49 @@ export function CheckScreen({ student, kind, ranges, groups, pages, lineCount, o
             surahs={surahs}
             active={[ranges[i].from, ranges[i].to]}
             onlyActive
+            hidden={!open}
+            peek={peeking}
             marks={marks}
-            onWord={toggle}
+            onWord={open ? toggle : undefined}
           />
         </div>
       ))}
 
       <div className="check-bar">
-        <div>
-          {t("errors")}: <b className="err-text">{errors}</b> · {t("notes")}: <b className="note-text">{notes}</b> ·{" "}
-          {t("grade")}: <b>{preview.grade}</b>
-        </div>
-        <button onClick={finish} disabled={!data}>
-          {t("finishCheck")}
-        </button>
+        {open ? (
+          <>
+            <div className="check-sums">
+              <span>
+                {t("errors")}: <b className="err-text">{errors}</b>
+              </span>
+              <span>
+                {t("notes")}: <b className="note-text">{notes}</b>
+              </span>
+              {byHeart && (
+                <span>
+                  {t("check_peeks")}: <b>{peeks}</b>
+                </span>
+              )}
+              <span>
+                {t("grade")}: <b>{preview.grade}</b>
+              </span>
+            </div>
+            <button onClick={finish} disabled={!data || recording}>
+              {t("finishCheck")}
+            </button>
+          </>
+        ) : (
+          <>
+            <span className="muted">
+              {peeking ? t("check_peeking") : offer ? t("check_offer") : recording ? t("check_listening") : t("check_start")}
+            </span>
+            {offer && (
+              <button onClick={peek}>
+                {t("peek")}
+              </button>
+            )}
+          </>
+        )}
       </div>
 
       {result && (
@@ -203,7 +298,8 @@ export function CheckScreen({ student, kind, ranges, groups, pages, lineCount, o
             <h2>{result.passed ? t("passed") : t("retake")}</h2>
             {!result.passed && <p className="muted">{t("retakeNote", { n: student.method.maxErrors })}</p>}
             <p className="muted">
-              {t("errors")}: {result.errors} · {t("notes")}: {result.notes}
+              {t("errors")}: {result.errors}, {t("notes")}: {result.notes}
+              {result.peeks ? `, ${t("check_peeks")}: ${result.peeks}` : ""}
             </p>
             <button onClick={onClose}>{t("close")}</button>
           </div>

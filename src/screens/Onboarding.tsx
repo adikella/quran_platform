@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { LANG_NAMES } from "../i18n";
 import { useMeta, useT } from "../hooks";
-import { addStudent, setLang, useAppState } from "../store";
+import { addStudent, importJson, setLang, useAppState } from "../store";
 import type { Lang, MushafId, Stage, Volume } from "../types";
 import { StartPicker } from "./TodayScreen";
 
@@ -16,6 +16,10 @@ export function Onboarding({ onDone, onCancel }: { onDone: () => void; onCancel?
   const [page, setPage] = useState(1);
   const [dir, setDir] = useState<1 | -1>(1);
   const meta = useMeta(mushaf);
+
+  const [paste, setPaste] = useState("");
+  const [pasteBad, setPasteBad] = useState(false);
+  const first = !onCancel;
 
   const create = () => {
     addStudent({ name, mushaf, stage, volume, direction: dir, startPage: stage === "nazira" ? 1 : page });
@@ -37,6 +41,36 @@ export function Onboarding({ onDone, onCancel }: { onDone: () => void; onCancel?
           ))}
         </div>
       </section>
+
+      {first && (
+        <details className="card transfer">
+          <summary>{t("transfer_title")}</summary>
+          <p className="muted">{t("transfer_how")}</p>
+          <textarea
+            rows={3}
+            value={paste}
+            aria-label={t("transfer_title")}
+            onChange={(e) => {
+              setPaste(e.target.value);
+              setPasteBad(false);
+            }}
+          />
+          {pasteBad && <p role="alert">{t("transfer_bad")}</p>}
+          <button
+            disabled={!paste.trim()}
+            onClick={() => {
+              try {
+                importJson(paste.trim());
+                onDone();
+              } catch {
+                setPasteBad(true);
+              }
+            }}
+          >
+            {t("transfer_do")}
+          </button>
+        </details>
+      )}
 
       <section className="card">
         <label>

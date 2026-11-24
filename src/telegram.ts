@@ -6,6 +6,12 @@ type TgWebApp = {
   HapticFeedback?: { impactOccurred(style: "light" | "medium" | "heavy"): void; notificationOccurred(t: "success" | "error" | "warning"): void };
   disableVerticalSwipes?: () => void;
   colorScheme?: "light" | "dark";
+  platform?: string;
+  isVersionAtLeast?: (v: string) => boolean;
+  addToHomeScreen?: () => void;
+  openLink?: (url: string) => void;
+  onEvent?: (name: string, fn: () => void) => void;
+  offEvent?: (name: string, fn: () => void) => void;
 };
 
 export const tg: TgWebApp | undefined = (window as any).Telegram?.WebApp?.initData !== undefined

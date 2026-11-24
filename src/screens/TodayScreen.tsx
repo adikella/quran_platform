@@ -1,3 +1,4 @@
+import { InstallCard } from "../components/InstallCard";
 import { useState } from "react";
 import { useMeta, useNow, usePages, useSurahs, useT } from "../hooks";
 import { dayPart, naziraTargetPages, nextLessonRange, revision, todayKey } from "../method";
@@ -65,7 +66,14 @@ export function TodayScreen({ student, go }: Props) {
   const t = useT();
   const meta = useMeta(student.mushaf);
   if (!meta) return <p className="muted pad">{t("loading")}</p>;
-  return student.stage === "nazira" ? <Nazira s={student} meta={meta} go={go} /> : <Hifz s={student} meta={meta} go={go} />;
+  return (
+    <>
+      {student.stage === "nazira" ? <Nazira s={student} meta={meta} go={go} /> : <Hifz s={student} meta={meta} go={go} />}
+      <div className="screen">
+        <InstallCard dismissible />
+      </div>
+    </>
+  );
 }
 
 function DailyBar({ s }: { s: Student }) {

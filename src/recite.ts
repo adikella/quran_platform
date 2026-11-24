@@ -8,12 +8,31 @@ export function normalizeAr(s: string): string {
   return s
     .replace(/[ؐ-ًؚ-ٰٟۖ-ۭ࣓-ࣿـ]/g, "")
     .replace(/[إأآٱٲٳ]/g, "ا")
-    .replace(/ى/g, "ي")
+    .replace(/[ىی]/g, "ي")
     .replace(/ة/g, "ه")
     .replace(/ؤ/g, "و")
-    .replace(/ئ/g, "ي")
-    .replace(/ء/g, "")
+    .replace(/[ئء]/g, "")
     .replace(/[^ء-ي]/g, "");
+}
+
+/**
+ * Как слово мусхафа может быть записано обычной орфографией: надстрочный алиф
+ * там то пишется (ٱلۡعَٰلَمِينَ, العالمين), то нет (هَٰذَا, هذا), а وٰ бывает и ا, и وا.
+ */
+const spellings = new Map<string, string[]>();
+function variants(word: string): string[] {
+  let v = spellings.get(word);
+  if (!v) {
+    v = [
+      ...new Set([
+        normalizeAr(word),
+        normalizeAr(word.replace(/ىٰ/g, "ى").replace(/وٰ/g, "ا").replace(/ٰ/g, "ا")),
+        normalizeAr(word.replace(/ىٰ/g, "ى").replace(/ٰ/g, "ا")),
+      ]),
+    ];
+    spellings.set(word, v);
+  }
+  return v;
 }
 
 function distance(a: string, b: string): number {
@@ -31,24 +50,21 @@ function distance(a: string, b: string): number {
   return prev[b.length];
 }
 
-/**
- * Насколько слова похожи (0–1). Орфография мусхафа отличается от обычной
- * (الصلوٰة и الصلاة, ٱلرَّحۡمَٰن и الرحمن), поэтому сравнение нестрогое.
- */
-export function similarity(a: string, b: string): number {
-  const x = normalizeAr(a);
-  const y = normalizeAr(b);
-  if (!x && !y) return 1;
-  const strip = (s: string) => s.replace(/[اوي]/g, "");
-  // Долгие гласные в мусхафе часто не пишутся: сравниваем и скелет без них.
-  const full = 1 - distance(x, y) / Math.max(x.length, y.length);
-  const sx = strip(x);
-  const sy = strip(y);
-  const skeleton = sx || sy ? 1 - distance(sx, sy) / Math.max(sx.length, sy.length, 1) : 0;
-  return Math.max(full, skeleton);
+/** Насколько слова похожи (0–1). `expected`: слово мусхафа, `heard`: что услышал ИИ. */
+export function similarity(expected: string, heard: string): number {
+  const y = normalizeAr(heard);
+  let best = 0;
+  for (const x of variants(expected)) {
+    if (!x && !y) return 1;
+    best = Math.max(best, 1 - distance(x, y) / Math.max(x.length, y.length));
+  }
+  return best;
 }
 
+/** С какой похожести слово считается тем же: модель немного ошибается в буквах. */
 export const SAME_WORD = 0.7;
+/** Слитно и раздельно (يَٰٓأَيُّهَا и «يا أيها»): только при почти полном совпадении, чтобы не скрыть пропуск. */
+const SAME_JOINED = 0.9;
 
 /**
  * Огласовка конца слова: a (фатха, фатхатан), u (дамма, даммтан), i (касра, касратан).
@@ -118,6 +134,34 @@ export function compareRecitation(expected: string[], heardText: string, pausal:
         cost[i][j] = extra;
         move[i][j] = 2;
       }
+      // Одно слово мусхафа записано двумя словами.
+      if (j > 1) {
+        const sim2 = similarity(expected[i - 1], heard[j - 2] + heard[j - 1]);
+        const c = cost[i - 1][j - 2] + 1 - sim2 + 0.05;
+        if (sim2 >= SAME_JOINED && c < cost[i][j]) {
+          cost[i][j] = c;
+          move[i][j] = 3;
+        }
+      }
+      // Васль: لَا ٱنفِصَامَ звучит как «لن فصام», граница слов сдвинута.
+      if (i > 1 && j > 1 && expected[i - 1].startsWith("ٱ")) {
+        const joined = normalizeAr(expected[i - 2]).replace(/[اوي]$/, "") + normalizeAr(expected[i - 1]).slice(1);
+        const heard2 = normalizeAr(heard[j - 2] + heard[j - 1]);
+        const c = cost[i - 2][j - 2] + 0.05;
+        if (joined === heard2 && c < cost[i][j]) {
+          cost[i][j] = c;
+          move[i][j] = 5;
+        }
+      }
+      // Два слова мусхафа записаны одним.
+      if (i > 1) {
+        const sim2 = similarity(expected[i - 2] + expected[i - 1], heard[j - 1]);
+        const c = cost[i - 2][j - 1] + 1 - sim2 + 0.05;
+        if (sim2 >= SAME_JOINED && c < cost[i][j]) {
+          cost[i][j] = c;
+          move[i][j] = 4;
+        }
+      }
     }
   }
   const words: WordVerdict[] = new Array(n);
@@ -126,7 +170,12 @@ export function compareRecitation(expected: string[], heardText: string, pausal:
   let j = m;
   while (i > 0 || j > 0) {
     const mv = move[i][j];
-    if (i > 0 && j > 0 && mv === 0) {
+    if (mv >= 3) {
+      words[i - 1] = { status: "ok" };
+      if (mv !== 3) words[i - 2] = { status: "ok" };
+      i -= mv === 3 ? 1 : 2;
+      j -= mv === 4 ? 1 : 2;
+    } else if (i > 0 && j > 0 && mv === 0) {
       const sim = similarity(expected[i - 1], heard[j - 1]);
       if (sim < SAME_WORD) words[i - 1] = { status: "wrong", heard: heard[j - 1] };
       else {
