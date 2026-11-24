@@ -13,7 +13,7 @@ function pickMime(): string | undefined {
  * Запись чтения с микрофона. Пока запись остаётся на устройстве: её можно прослушать.
  * Дальше её будет получать устаз или ИИ-проверка (см. ИИ-ПРОВЕРКА.md).
  */
-export function Recorder() {
+export function Recorder({ onAudio }: { onAudio?: (blob: Blob | null) => void } = {}) {
   const t = useT();
   const [status, setStatus] = useState<Status>(() =>
     typeof navigator.mediaDevices?.getUserMedia === "function" && typeof MediaRecorder !== "undefined" ? "idle" : "unsupported",
@@ -56,7 +56,9 @@ export function Recorder() {
           return URL.createObjectURL(blob);
         });
         setStatus("done");
+        onAudio?.(blob);
       };
+      onAudio?.(null);
       r.start();
       rec.current = r;
       setSeconds(0);

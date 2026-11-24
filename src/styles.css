@@ -841,3 +841,17 @@ button.sticky-cta {
 .onboarding h1 {
   color: var(--accent);
 }
+.ai-check {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0;
+}
+.ai-check p {
+  margin: 0;
+}
+.ai-heard {
+  font-family: "Hafs", "Scheherazade New", serif;
+  font-size: 22px;
+  line-height: 1.8;
+  margin: 8px 0 0;
+}
