@@ -63,6 +63,8 @@ export interface LessonProgress {
   range: LineRange;
   step: number;
   done: number;
+  /** Сколько раз повторён этот урок (счётчик до нормы 200). */
+  reps?: number;
 }
 
 export interface Submission {
@@ -84,7 +86,7 @@ export interface DayStats {
   reps: number;
   seconds: Partial<Record<TimeCategory, number>>;
   /** Уроки, выученные за день (сабак). */
-  learned: { range: LineRange; fromVerse: string; toVerse: string }[];
+  learned: { range: LineRange; fromVerse: string; toVerse: string; reps?: number }[];
 }
 
 export interface Student {

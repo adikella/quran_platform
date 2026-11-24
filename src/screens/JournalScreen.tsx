@@ -3,6 +3,13 @@ import { useMeta, useSurahs, useT } from "../hooks";
 import { verseSpanLabel } from "../mushaf";
 import type { Student, Submission } from "../types";
 
+/** «раз» или «раза»: 2 раза, 5 раз, 22 раза, 157 раз. */
+function razWord(n: number) {
+  const a = n % 10;
+  const b = n % 100;
+  return a >= 2 && a <= 4 && (b < 12 || b > 14) ? "раза" : "раз";
+}
+
 function SubLine({ sub }: { sub: Submission }) {
   const { lang } = useAppState();
   const surahs = useSurahs();
@@ -54,7 +61,12 @@ export function JournalScreen({ student }: { student: Student }) {
               <dt>{t("col_sabak")}</dt>
               <dd>
                 {day?.learned.length
-                  ? day.learned.map((l, i) => <div key={i}>{verseSpanLabel(l.fromVerse, l.toVerse, surahs, lang)}</div>)
+                  ? day.learned.map((l, i) => (
+                      <div key={i} className="sub-line">
+                        <span>{verseSpanLabel(l.fromVerse, l.toVerse, surahs, lang)}</span>
+                        {l.reps !== undefined && <span className="muted">{t("readTimes", { n: l.reps, raz: razWord(l.reps) })}</span>}
+                      </div>
+                    ))
                   : "—"}
               </dd>
               <dt>{t("col_sabki")}</dt>

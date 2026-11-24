@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMeta, useNow, usePages, useSurahs, useT } from "../hooks";
 import { dayPart, naziraTargetPages, nextLessonRange, revision, todayKey } from "../method";
 import { verseSpanLabel, versesOfRange } from "../mushaf";
-import { beginLesson, getDay, startHifz, useAppState } from "../store";
+import { beginLesson, lessonReps, startHifz, useAppState } from "../store";
 import type { Key } from "../i18n";
 import type { LineRange, MushafMeta, Student, SubmissionKind } from "../types";
 
@@ -70,15 +70,15 @@ export function TodayScreen({ student, go }: Props) {
 
 function DailyBar({ s }: { s: Student }) {
   const t = useT();
-  const d = getDay(s);
+  const reps = lessonReps(s);
   const target = s.method.dailyTarget;
   return (
     <div className="card daily">
       <span>
-        {t("dailyReps")}: <b>{d.reps}</b> / {target}
+        {t("dailyReps")}: <b>{reps}</b> / {target}
       </span>
       <div className="bar">
-        <div style={{ width: `${Math.min(100, (d.reps / target) * 100)}%` }} />
+        <div style={{ width: `${Math.min(100, (reps / target) * 100)}%` }} />
       </div>
     </div>
   );

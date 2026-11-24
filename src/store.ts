@@ -173,9 +173,25 @@ export function startHifz(id: string, startPage: number, direction: 1 | -1) {
   }));
 }
 
-/** +1 повторение к дневной норме. */
+/** +1 повторение урока: идёт в счётчик урока и в общий итог дня. */
 export function addRep(id: string, delta = 1) {
-  updateStudent(id, (s) => withDay(s, (d) => ({ ...d, reps: Math.max(0, d.reps + delta) })));
+  updateStudent(id, (s) => {
+    const l = s.hifz.lesson;
+    const next = l ? { ...s, hifz: { ...s.hifz, lesson: { ...l, reps: Math.max(0, (l.reps ?? 0) + delta) } } } : s;
+    return withDay(next, (d) => ({ ...d, reps: Math.max(0, d.reps + delta) }));
+  });
+}
+
+/** Сколько раз повторён текущий урок; если урок выучен и ждёт сдачи, то сколько было у него. */
+export function lessonReps(s: Student): number {
+  if (s.hifz.lesson) return s.hifz.lesson.reps ?? 0;
+  if (s.hifz.pending) {
+    for (const date of Object.keys(s.days).sort().reverse()) {
+      const l = [...s.days[date].learned].reverse().find((x) => x.range.page === s.hifz.pending!.page && x.range.from === s.hifz.pending!.from);
+      if (l) return l.reps ?? 0;
+    }
+  }
+  return 0;
 }
 
 export function addTime(id: string, cat: TimeCategory, seconds: number) {
@@ -209,7 +225,7 @@ export function finishLesson(id: string, fromVerse: string, toVerse: string) {
     const l = s.hifz.lesson;
     if (!l) return s;
     const next = { ...s, hifz: { ...s.hifz, lesson: null, pending: l.range } };
-    return withDay(next, (d) => ({ ...d, learned: [...d.learned, { range: l.range, fromVerse, toVerse }] }));
+    return withDay(next, (d) => ({ ...d, learned: [...d.learned, { range: l.range, fromVerse, toVerse, reps: l.reps ?? 0 }] }));
   });
 }
 

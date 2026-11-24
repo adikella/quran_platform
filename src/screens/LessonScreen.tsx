@@ -5,7 +5,7 @@ import { useMeta, usePages, useSessionTimer, useSurahs, useT } from "../hooks";
 import type { Key } from "../i18n";
 import { BRIDGE_WORDS, buildSteps, previousLesson } from "../method";
 import { versesOfRange } from "../mushaf";
-import { abandonLesson, addRep, addTime, finishLesson, getDay, patchStudent, setLessonProgress } from "../store";
+import { abandonLesson, addRep, addTime, finishLesson, patchStudent, setLessonProgress } from "../store";
 import { haptic } from "../telegram";
 import type { Step, Student } from "../types";
 
@@ -79,7 +79,7 @@ export function LessonScreen({ student, onClose, onSubmitNow }: Props) {
   const bridgePage =
     step && page && next && step.kind !== "readFirst" && step.range.to >= page.l.length ? next : undefined;
   const done = lesson.done;
-  const daily = { reps: getDay(student).reps, target: student.method.dailyTarget };
+  const daily = { reps: lesson.reps ?? 0, target: student.method.dailyTarget };
 
   const inc = () => {
     haptic("tap");
