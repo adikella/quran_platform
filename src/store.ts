@@ -257,7 +257,7 @@ export interface CheckResult {
 export function submit(id: string, r: CheckResult, pages: number, lineCount: (p: number) => number): Submission {
   let saved!: Submission;
   updateStudent(id, (s) => {
-    const { grade, passed } = gradeFor(r.errors, s.method.maxErrors);
+    const { grade, passed } = gradeFor(r.errors + r.notes, s.method.maxErrors);
     const { groups, ...rest } = r;
     saved = { id: uid(), date: todayKey(), grade, passed, ...rest };
     let next: Student = { ...s, submissions: [...s.submissions, saved] };

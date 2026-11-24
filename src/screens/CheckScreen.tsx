@@ -40,7 +40,8 @@ export function CheckScreen({ student, kind, ranges, groups, pages, lineCount, o
 
   const errors = Object.values(marks).filter((m) => m === 1).length;
   const notes = Object.values(marks).filter((m) => m === 2).length;
-  const preview = gradeFor(errors, student.method.maxErrors);
+  // Ошибка таджвида (не протянул мадд и так далее) тоже ошибка и снижает оценку.
+  const preview = gradeFor(errors + notes, student.method.maxErrors);
 
   const toggle = (key: string) => {
     haptic("tap");
