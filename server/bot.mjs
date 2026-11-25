@@ -4,9 +4,12 @@
 // Токен берётся только из окружения (BOT_TOKEN, файл /etc/quran/bot.env).
 // В репозиторий и в логи токен не попадает.
 //
+// Вход на сайте: сайт даёт ссылку /start login_КЛЮЧ, человек подтверждает здесь (см. server/api.py).
+//
 // Кто нажал /start, тот получает напоминания; /stop отключает.
 // Подписчики хранятся в DATA_DIR/subscribers.json.
 
+import { createHmac } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -14,7 +17,7 @@ const TOKEN = process.env.BOT_TOKEN;
 const APP_URL = process.env.APP_URL || "https://130-61-147-45.sslip.io";
 const TZ = process.env.TZ_NAME || "Asia/Almaty";
 const DATA_DIR = process.env.DATA_DIR || "/var/lib/quran-bot";
-const API = `https://api.telegram.org/bot${TOKEN}`;
+const API = `${process.env.TELEGRAM_API || "https://api.telegram.org"}/bot${TOKEN}`;
 
 if (!TOKEN) {
   console.error("Нет BOT_TOKEN: положите токен скриптом scripts/set-bot-token.sh");
@@ -52,6 +55,52 @@ async function call(method, body) {
 
 const button = (url) => ({ inline_keyboard: [[{ text: "Открыть", web_app: { url } }]] });
 const send = (chat_id, text, url = APP_URL) => call("sendMessage", { chat_id, text, reply_markup: button(url) });
+
+// ---------- вход на сайте ----------
+
+const INTERNAL = process.env.API_INTERNAL || "http://127.0.0.1:8091/internal";
+const SECRET = createHmac("sha256", TOKEN).update("quran-internal").digest("hex");
+
+/** Запрос к quran-api на этом же сервере; null, если ссылка устарела. */
+async function internal(path, body) {
+  const res = await fetch(INTERNAL + path, {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-bot": SECRET },
+    body: JSON.stringify(body),
+  });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`internal ${path}: ${res.status}`);
+  return res.json();
+}
+
+const EXPIRED = "Эта ссылка для входа устарела. Нажмите «Войти через Telegram» на сайте ещё раз.";
+
+async function askLogin(chat, start) {
+  const login = await internal("/login", { start });
+  if (!login) return call("sendMessage", { chat_id: chat, text: EXPIRED });
+  return call("sendMessage", {
+    chat_id: chat,
+    text:
+      `Вход на сайт «Устаз-помощник». На сайте должно быть число ${login.number}.\n\n` +
+      "Это вы входите? Если ссылку вам кто-то прислал, нажмите «Нет»: иначе он войдёт вместо вас.",
+    reply_markup: {
+      inline_keyboard: [[
+        { text: "Да, это я", callback_data: `login:y:${start}` },
+        { text: "Нет", callback_data: `login:n:${start}` },
+      ]],
+    },
+  });
+}
+
+async function onButton(q) {
+  const m = (q.data || "").match(/^login:([yn]):([\w-]{10,40})$/);
+  if (!m || !q.message) return call("answerCallbackQuery", { callback_query_id: q.id });
+  const yes = m[1] === "y";
+  const done = await internal("/login/answer", { start: m[2], yes, tg_id: q.from.id, name: q.from.first_name || "" });
+  await call("answerCallbackQuery", { callback_query_id: q.id });
+  const text = !done ? EXPIRED : yes ? "Готово, вы вошли. Вернитесь на сайт." : "Вход отклонён.";
+  await call("editMessageText", { chat_id: q.message.chat.id, message_id: q.message.message_id, text });
+}
 
 // ---------- подписчики ----------
 
@@ -125,7 +174,10 @@ const minutes = (hm) => Number(hm.slice(0, 2)) * 60 + Number(hm.slice(3, 5));
 async function onMessage(msg) {
   const chat = String(msg.chat.id);
   const text = (msg.text || "").trim();
-  if (text.startsWith("/start")) {
+  const login = text.match(/^\/start login_([\w-]{10,40})$/)?.[1];
+  if (login) {
+    if (msg.chat.type === "private") await askLogin(chat, login);
+  } else if (text.startsWith("/start")) {
     const { date } = nowLocal();
     // Сегодняшние прошедшие напоминания помечаем отправленными, чтобы не прислать всё сразу.
     const last = Object.fromEntries(SCHEDULE.map((s) => [s.at, date]));
@@ -134,7 +186,7 @@ async function onMessage(msg) {
     subs[chat] = { name: msg.from?.first_name || "", since: date, last };
     await save();
     // Ссылка учителя: t.me/бот?start=join_КОД. Приложение откроется сразу на записи к нему.
-    const join = text.match(/^\/start join_([A-Z0-9]{6})$/)?.[1];
+    const join = text.match(/^\/start join_([A-Z0-9]{6,16})$/)?.[1];
     if (join) await send(chat, "Ассаляму алейкум! Учитель зовёт вас в группу. Откройте приложение кнопкой ниже.", `${APP_URL}/?join=${join}`);
     else await send(chat, WELCOME);
   } else if (text.startsWith("/stop")) {
@@ -150,9 +202,10 @@ async function poll() {
   let offset = 0;
   for (;;) {
     try {
-      const updates = await call("getUpdates", { offset, timeout: 50, allowed_updates: ["message"] });
+      const updates = await call("getUpdates", { offset, timeout: 50, allowed_updates: ["message", "callback_query"] });
       for (const u of updates) {
         offset = u.update_id + 1;
+        if (u.callback_query) await onButton(u.callback_query).catch((e) => console.error(`кнопка: ${e.message}`));
         if (u.message) await onMessage(u.message).catch((e) => console.error(`сообщение: ${e.message}`));
       }
     } catch (e) {

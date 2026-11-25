@@ -4,11 +4,13 @@
 - прогресс ученика (students.data) пишет только аккаунт самого ученика; учитель его читает;
 - решение учителя хранится в submissions, приложение ученика забирает его и засчитывает у себя.
 
-Вход: Telegram (подпись initData проверяется токеном бота) или одноразовый код с другого устройства.
-Учитель видит ученика, только если тот ввёл код учителя и учитель его принял.
+Вход только через Telegram. Внутри Telegram подпись initData проверяется токеном бота.
+На сайте: сайт получает ссылку на бота, человек нажимает в боте «Да, это я», и ожидающий сайт входит.
+Учитель видит ученика, только если тот открыл ссылку группы, записался и учитель его принял.
 Запись голоса принимается только с разрешения (links.consent) и удаляется через 30 дней после проверки.
 """
 
+import asyncio
 import hashlib
 import hmac
 import json
@@ -37,7 +39,8 @@ APP_URL = os.environ.get("APP_URL", "https://130-61-147-45.sslip.io")
 MAX_DOC = 1_000_000
 MAX_AUDIO = 40 * 1024 * 1024
 MAX_AUDIO_TOTAL = 20 * 1024**3
-CODE_SECONDS = 600
+LOGIN_SECONDS = 600
+POLL_SECONDS = 20
 KEEP_CHECKED = 30 * 86400
 KEEP_WAITING = 60 * 86400
 PAGES = {"madani": 604, "indopak": 610}
@@ -49,14 +52,20 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS accounts (
   id TEXT PRIMARY KEY, tg_id INTEGER UNIQUE, name TEXT NOT NULL, role TEXT, teacher_code TEXT UNIQUE, created INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS tokens (hash TEXT PRIMARY KEY, account TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE, created INTEGER NOT NULL);
-CREATE TABLE IF NOT EXISTS login_codes (hash TEXT PRIMARY KEY, account TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE, expires INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS logins (
+  poll TEXT PRIMARY KEY, start TEXT NOT NULL UNIQUE, number INTEGER NOT NULL, status TEXT NOT NULL,
+  account TEXT REFERENCES accounts(id) ON DELETE CASCADE, expires INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS groups (
+  id TEXT PRIMARY KEY, teacher TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  name TEXT NOT NULL, code TEXT NOT NULL UNIQUE, created INTEGER NOT NULL);
+DROP TABLE IF EXISTS login_codes;
 CREATE TABLE IF NOT EXISTS students (
   id TEXT PRIMARY KEY, account TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
   data TEXT, rev INTEGER NOT NULL, updated INTEGER NOT NULL, deleted INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS links (
   student TEXT PRIMARY KEY REFERENCES students(id) ON DELETE CASCADE,
   teacher TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
-  status TEXT NOT NULL, consent INTEGER, created INTEGER NOT NULL);
+  status TEXT NOT NULL, consent INTEGER, created INTEGER NOT NULL, grp TEXT REFERENCES groups(id));
 CREATE TABLE IF NOT EXISTS submissions (
   id TEXT PRIMARY KEY, student TEXT NOT NULL REFERENCES students(id) ON DELETE CASCADE,
   teacher TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
@@ -92,6 +101,14 @@ def db():
 with sqlite3.connect(DB) as _c:
     _c.execute("PRAGMA journal_mode=WAL")
     _c.executescript(SCHEMA)
+    # Раньше у учителя был один код и одна группа: код остаётся ссылкой этой группы.
+    if "grp" not in {r[1] for r in _c.execute("PRAGMA table_info(links)")}:
+        _c.execute("ALTER TABLE links ADD COLUMN grp TEXT REFERENCES groups(id)")
+    for _a, _code in _c.execute("SELECT id, teacher_code FROM accounts WHERE teacher_code IS NOT NULL").fetchall():
+        _g = secrets.token_urlsafe(9)
+        _c.execute("INSERT INTO groups VALUES (?,?,?,?,?)", (_g, _a, "Моя группа", _code, int(time.time())))
+        _c.execute("UPDATE links SET grp=? WHERE teacher=? AND grp IS NULL", (_g, _a))
+        _c.execute("UPDATE accounts SET teacher_code=NULL WHERE id=?", (_a,))
 os.chmod(DB, 0o600)
 
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
@@ -292,7 +309,7 @@ def bot_call(method: str, body: dict | None = None) -> dict | None:
         return None
 
 
-_bot_name: str | None = None
+_bot_name: str | None = os.environ.get("BOT_NAME")
 
 
 def bot_name() -> str | None:
@@ -348,7 +365,7 @@ def new_account(c: sqlite3.Connection, name: str, tg_id: int | None) -> str:
 
 
 def account_json(a: sqlite3.Row) -> dict:
-    return {"id": a["id"], "name": a["name"], "role": a["role"], "code": a["teacher_code"], "telegram": a["tg_id"] is not None}
+    return {"id": a["id"], "name": a["name"], "role": a["role"]}
 
 
 def signed_in(c: sqlite3.Connection, aid: str) -> dict:
@@ -364,74 +381,115 @@ class NameIn(BaseModel):
     name: Name
 
 
-class RedeemIn(BaseModel):
-    code: str = Field(max_length=32)
-    initData: str | None = Field(default=None, max_length=8000)
+def telegram_account(c: sqlite3.Connection, tg_id: int, name: str) -> str:
+    a = c.execute("SELECT id FROM accounts WHERE tg_id=?", (tg_id,)).fetchone()
+    return a["id"] if a else new_account(c, name, tg_id)
 
 
 @app.post("/api/auth/telegram")
 def auth_telegram(body: TgIn):
+    """Вход внутри Telegram."""
     u = telegram_user(body.initData)
     with db() as c:
-        a = c.execute("SELECT id FROM accounts WHERE tg_id=?", (u["id"],)).fetchone()
-        return signed_in(c, a["id"] if a else new_account(c, u["name"], u["id"]))
+        return signed_in(c, telegram_account(c, u["id"], u["name"]))
 
 
-@app.post("/api/auth/new")
-def auth_new(body: NameIn):
+# Вход на сайте. Сайт знает секрет poll и ждёт по нему; бот знает только start из ссылки.
+# Число видно и на сайте, и в боте: по нему понятно, что подтверждаешь именно свой вход.
+
+
+@app.post("/api/auth/web")
+def auth_web():
+    bot = bot_name()
+    if not bot:
+        raise HTTPException(503, "telegram off")
+    poll, start, number = secrets.token_urlsafe(32), secrets.token_urlsafe(18), secrets.randbelow(90) + 10
     with db() as c:
-        return signed_in(c, new_account(c, body.name.strip(), None))
+        c.execute("DELETE FROM logins WHERE expires<?", (now(),))
+        c.execute("INSERT INTO logins VALUES (?,?,?,'new',NULL,?)", (sha(poll), start, number, now() + LOGIN_SECONDS))
+    return {"poll": poll, "number": number, "seconds": LOGIN_SECONDS, "link": f"https://t.me/{bot}?start=login_{start}"}
 
 
-@app.post("/api/auth/code")
-def auth_code(me: Me):
-    """Код, чтобы войти в этот же аккаунт на другом устройстве."""
-    value = code(8)
+class PollIn(BaseModel):
+    poll: str = Field(max_length=100)
+
+
+def take_login(poll: str) -> dict | None:
+    """Вход, если его подтвердили; None, если ещё ждём.
+
+    Ответ выдаётся, пока вход не устарел, а не один раз: пока человек в Telegram, телефон обрывает
+    запрос сайта, и одноразовый ответ ушёл бы в никуда. Секрет poll знает только этот сайт.
+    """
     with db() as c:
-        c.execute("DELETE FROM login_codes WHERE account=? OR expires<?", (me["id"], now()))
-        c.execute("INSERT INTO login_codes VALUES (?,?,?)", (sha(value), me["id"], now() + CODE_SECONDS))
-    return {"code": value, "seconds": CODE_SECONDS}
+        r = c.execute("SELECT * FROM logins WHERE poll=?", (sha(poll),)).fetchone()
+        if not r or r["expires"] < now():
+            raise HTTPException(410, "expired")
+        if r["status"] == "new":
+            return None
+        return signed_in(c, r["account"]) if r["status"] == "yes" else {"declined": True}
 
 
-@app.post("/api/auth/redeem")
-def auth_redeem(body: RedeemIn, authorization: Annotated[str | None, Header()] = None):
-    tg = telegram_user(body.initData) if body.initData else None
+@app.post("/api/login/poll")
+async def poll_login(body: PollIn):
+    for _ in range(POLL_SECONDS):
+        done = await asyncio.to_thread(take_login, body.poll)
+        if done:
+            return done
+        await asyncio.sleep(1)
+    return {"waiting": True}
+
+
+# Для бота на этом же сервере. Наружу nginx отдаёт только /api/, но секрет проверяется всё равно.
+
+
+def bot_secret() -> str:
+    return hmac.new(BOT_TOKEN.encode(), b"quran-internal", hashlib.sha256).hexdigest()
+
+
+def from_bot(x_bot: Annotated[str, Header()] = ""):
+    if not BOT_TOKEN or not hmac.compare_digest(x_bot.encode(), bot_secret().encode()):
+        raise HTTPException(403, "no")
+
+
+class BotLogin(BaseModel):
+    start: str = Field(max_length=64)
+    tg_id: int | None = None
+    name: str = Field(default="", max_length=200)
+    yes: bool = False
+
+
+@app.post("/internal/login", dependencies=[Depends(from_bot)])
+def bot_look(body: BotLogin):
     with db() as c:
-        row = c.execute(
-            "SELECT account FROM login_codes WHERE hash=? AND expires>=?", (sha(clean_code(body.code)), now())
-        ).fetchone()
-        if not row:
-            raise HTTPException(404, "bad code")
-        target = row["account"]
-        c.execute("DELETE FROM login_codes WHERE account=?", (target,))
-        # Устройство уже вошло в другой аккаунт: его ученики и группа переезжают в тот, чей код введён.
-        mine = account_by_token(c, authorization)
-        if mine and mine["id"] != target:
-            merge_accounts(c, mine["id"], target)
-        if tg:
-            other = c.execute("SELECT id FROM accounts WHERE tg_id=?", (tg["id"],)).fetchone()
-            if not other:
-                c.execute("UPDATE accounts SET tg_id=? WHERE id=? AND tg_id IS NULL", (tg["id"], target))
-        return signed_in(c, target)
+        r = c.execute("SELECT number FROM logins WHERE start=? AND status='new' AND expires>=?", (body.start, now())).fetchone()
+    if not r:
+        raise HTTPException(404, "expired")
+    return {"number": r["number"]}
 
 
-def merge_accounts(c: sqlite3.Connection, src: str, dst: str):
-    a = c.execute("SELECT * FROM accounts WHERE id=?", (src,)).fetchone()
-    b = c.execute("SELECT * FROM accounts WHERE id=?", (dst,)).fetchone()
-    c.execute("UPDATE students SET account=? WHERE account=?", (dst, src))
-    c.execute("UPDATE links SET teacher=? WHERE teacher=?", (dst, src))
-    c.execute("UPDATE submissions SET teacher=? WHERE teacher=?", (dst, src))
-    c.execute("DELETE FROM accounts WHERE id=?", (src,))
-    c.execute(
-        "UPDATE accounts SET tg_id=?, role=?, teacher_code=? WHERE id=?",
-        (b["tg_id"] or a["tg_id"], b["role"] or a["role"], b["teacher_code"] or a["teacher_code"], dst),
-    )
+@app.post("/internal/login/answer", dependencies=[Depends(from_bot)])
+def bot_answer(body: BotLogin):
+    with db() as c:
+        r = c.execute("SELECT poll FROM logins WHERE start=? AND status='new' AND expires>=?", (body.start, now())).fetchone()
+        if not r or (body.yes and not body.tg_id):
+            raise HTTPException(404, "expired")
+        account = telegram_account(c, body.tg_id, body.name[:80]) if body.yes else None
+        c.execute("UPDATE logins SET status=?, account=? WHERE poll=?", ("yes" if body.yes else "no", account, r["poll"]))
+    return {"ok": True}
 
 
 @app.post("/api/auth/logout")
 def logout(me: Me, authorization: Annotated[str | None, Header()] = None):
     with db() as c:
         c.execute("DELETE FROM tokens WHERE hash=?", (sha(authorization[7:]),))
+    return {"ok": True}
+
+
+@app.post("/api/auth/logout-others")
+def logout_others(me: Me, authorization: Annotated[str | None, Header()] = None):
+    """Выйти везде, кроме этого устройства."""
+    with db() as c:
+        c.execute("DELETE FROM tokens WHERE account=? AND hash<>?", (me["id"], sha(authorization[7:])))
     return {"ok": True}
 
 
@@ -447,12 +505,8 @@ def patch_me(body: MePatch, me: Me):
             c.execute("UPDATE accounts SET name=? WHERE id=?", (body.name.strip() or me["name"], me["id"]))
         if body.role:
             c.execute("UPDATE accounts SET role=? WHERE id=?", (body.role, me["id"]))
-        if body.role == "teacher" and not me["teacher_code"]:
-            while True:
-                value = code(6)
-                if not c.execute("SELECT 1 FROM accounts WHERE teacher_code=?", (value,)).fetchone():
-                    break
-            c.execute("UPDATE accounts SET teacher_code=? WHERE id=?", (value, me["id"]))
+        if body.role == "teacher" and not c.execute("SELECT 1 FROM groups WHERE teacher=?", (me["id"],)).fetchone():
+            new_group(c, me["id"], "Моя группа")
         return account_json(c.execute("SELECT * FROM accounts WHERE id=?", (me["id"],)).fetchone())
 
 
@@ -513,7 +567,7 @@ def purge():
     with db() as c:
         files = drop_audio(c, "status='checked' AND checked<?", (t - KEEP_CHECKED,))
         files += drop_waiting(c, "created<?", (t - KEEP_WAITING,))
-        c.execute("DELETE FROM login_codes WHERE expires<?", (t,))
+        c.execute("DELETE FROM logins WHERE expires<?", (t,))
         known = {r["audio"] for r in c.execute("SELECT audio FROM submissions WHERE audio IS NOT NULL")}
     remove_files(files)
     # Файлы без строки в базе (сервис упал посреди загрузки).
@@ -550,7 +604,8 @@ def sync(me: Me):
     with db() as c:
         rows = c.execute("SELECT * FROM students WHERE account=?", (me["id"],)).fetchall()
         links = c.execute(
-            "SELECT l.*, a.name FROM links l JOIN students s ON s.id=l.student JOIN accounts a ON a.id=l.teacher WHERE s.account=?",
+            "SELECT l.*, a.name, g.name AS grp_name FROM links l JOIN students s ON s.id=l.student"
+            " JOIN accounts a ON a.id=l.teacher JOIN groups g ON g.id=l.grp WHERE s.account=?",
             (me["id"],),
         ).fetchall()
         subs = c.execute(
@@ -564,7 +619,7 @@ def sync(me: Me):
         "students": [{"id": r["id"], "rev": r["rev"], "data": json.loads(r["data"])} for r in rows if not r["deleted"]],
         "deleted": [r["id"] for r in rows if r["deleted"]],
         "links": [
-            {"student": r["student"], "teacher": r["name"], "status": r["status"], "consent": r["consent"] is not None}
+            {"student": r["student"], "teacher": r["name"], "group": r["grp_name"], "status": r["status"], "consent": r["consent"] is not None}
             for r in links
         ],
         "waiting": [sub_json(r) for r in subs if r["status"] == "waiting"],
@@ -641,33 +696,42 @@ class ConsentIn(BaseModel):
     consent: bool
 
 
-@app.get("/api/teachers/{value}")
-def find_teacher(value: str, me: Me):
-    """Имя учителя по его коду, чтобы ученик увидел, к кому записывается."""
+GROUP_BY_CODE = "SELECT g.*, a.name AS teacher_name, a.tg_id FROM groups g JOIN accounts a ON a.id=g.teacher WHERE g.code=?"
+
+
+@app.get("/api/invites/{value}")
+def invite(value: str, me: Me):
+    """Куда ведёт ссылка: учитель и группа."""
     with db() as c:
-        t = c.execute("SELECT name FROM accounts WHERE teacher_code=?", (clean_code(value),)).fetchone()
-    if not t:
-        raise HTTPException(404, "no teacher")
-    return {"name": t["name"]}
+        g = c.execute(GROUP_BY_CODE, (clean_code(value),)).fetchone()
+    if not g:
+        raise HTTPException(404, "no group")
+    return {"teacher": g["teacher_name"], "group": g["name"], "own": g["teacher"] == me["id"]}
 
 
 @app.post("/api/students/{sid}/join")
 def join(sid: Id, body: JoinIn, me: Me):
     with db() as c:
         my_student(c, me, sid)
-        t = c.execute("SELECT * FROM accounts WHERE teacher_code=?", (clean_code(body.code),)).fetchone()
-        if not t:
-            raise HTTPException(404, "no teacher")
+        g = c.execute(GROUP_BY_CODE, (clean_code(body.code),)).fetchone()
+        if not g:
+            raise HTTPException(404, "no group")
         old = c.execute("SELECT * FROM links WHERE student=?", (sid,)).fetchone()
         consent = now() if body.consent else None
         files = []
-        if old and old["teacher"] == t["id"]:
-            c.execute("UPDATE links SET consent=? WHERE student=?", (consent, sid))
+        if old and old["teacher"] == g["teacher"]:
+            # Тот же учитель, другая группа: подтверждать второй раз незачем.
+            c.execute("UPDATE links SET grp=?, consent=? WHERE student=?", (g["id"], consent, sid))
+            if not body.consent:
+                files = drop_waiting(c, "student=?", (sid,)) + drop_audio(c, "student=?", (sid,))
         else:
             if old:
                 files = unlink(c, sid)
-            c.execute("INSERT INTO links VALUES (?,?,'pending',?,?)", (sid, t["id"], consent, now()))
-            notify(t["tg_id"], "Новый ученик просится в группу. Откройте кабинет учителя.")
+            c.execute(
+                "INSERT INTO links (student,teacher,status,consent,created,grp) VALUES (?,?,'pending',?,?,?)",
+                (sid, g["teacher"], consent, now(), g["id"]),
+            )
+            notify(g["tg_id"], "Новый ученик просится в группу. Откройте кабинет учителя.")
     remove_files(files)
     return {"ok": True}
 
@@ -816,11 +880,61 @@ def my_pupil(c: sqlite3.Connection, me: sqlite3.Row, sid: str) -> sqlite3.Row:
     return r
 
 
+def new_group(c: sqlite3.Connection, teacher_id: str, name: str) -> str:
+    gid = secrets.token_urlsafe(9)
+    c.execute("INSERT INTO groups VALUES (?,?,?,?,?)", (gid, teacher_id, name, code(10), now()))
+    return gid
+
+
+def my_group(c: sqlite3.Connection, me: sqlite3.Row, gid: str) -> sqlite3.Row:
+    g = c.execute("SELECT * FROM groups WHERE id=? AND teacher=?", (gid, me["id"])).fetchone()
+    if not g:
+        raise HTTPException(404, "no group")
+    return g
+
+
+@app.post("/api/groups")
+def create_group(body: NameIn, me: Me):
+    with db() as c:
+        if me["role"] != "teacher":
+            raise HTTPException(403, "not a teacher")
+        if c.execute("SELECT COUNT(*) FROM groups WHERE teacher=?", (me["id"],)).fetchone()[0] >= 30:
+            raise HTTPException(409, "too many groups")
+        return {"id": new_group(c, me["id"], body.name.strip() or "Группа")}
+
+
+@app.patch("/api/groups/{gid}")
+def rename_group(gid: Id, body: NameIn, me: Me):
+    with db() as c:
+        g = my_group(c, me, gid)
+        c.execute("UPDATE groups SET name=? WHERE id=?", (body.name.strip() or g["name"], gid))
+    return {"ok": True}
+
+
+@app.post("/api/groups/{gid}/link")
+def renew_link(gid: Id, me: Me):
+    """Новая ссылка: по старой больше не записаться. Кто уже в группе, остаётся."""
+    with db() as c:
+        my_group(c, me, gid)
+        c.execute("UPDATE groups SET code=? WHERE id=?", (code(10), gid))
+    return {"ok": True}
+
+
+@app.delete("/api/groups/{gid}")
+def delete_group(gid: Id, me: Me):
+    with db() as c:
+        my_group(c, me, gid)
+        if c.execute("SELECT 1 FROM links WHERE grp=?", (gid,)).fetchone():
+            raise HTTPException(409, "not empty")
+        c.execute("DELETE FROM groups WHERE id=?", (gid,))
+    return {"ok": True}
+
+
 @app.get("/api/teacher")
 def teacher(me: Me):
     with db() as c:
         rows = c.execute(
-            "SELECT l.status, l.consent, l.created AS asked, s.id, s.data, s.updated FROM links l JOIN students s ON s.id=l.student"
+            "SELECT l.status, l.consent, l.grp, l.created AS asked, s.id, s.data, s.updated FROM links l JOIN students s ON s.id=l.student"
             " WHERE l.teacher=? AND s.deleted=0 ORDER BY l.created", (me["id"],),
         ).fetchall()
         subs = c.execute(
@@ -831,17 +945,21 @@ def teacher(me: Me):
             "SELECT b.* FROM submissions b JOIN links l ON l.student=b.student AND l.teacher=b.teacher AND l.status='active'"
             " WHERE b.teacher=? AND b.status='checked' AND b.checked>? ORDER BY b.checked", (me["id"], now() - 120 * 86400),
         ).fetchall()
+        groups = c.execute("SELECT * FROM groups WHERE teacher=? ORDER BY created, rowid", (me["id"],)).fetchall()
     bot = bot_name()
     # Решения, которые телефон ученика ещё не забрал: без них учитель видел бы урок несданным.
     seen = {r["id"]: {x["id"] for x in json.loads(r["data"])["submissions"]} for r in rows if r["status"] == "active"}
     return {
         "fresh": [sub_json(r) for r in done if r["id"] not in seen[r["student"]]],
-        "code": me["teacher_code"],
-        "link": f"https://t.me/{bot}?start=join_{me['teacher_code']}" if bot and me["teacher_code"] else None,
+        "groups": [
+            {"id": g["id"], "name": g["name"],
+             "link": f"https://t.me/{bot}?start=join_{g['code']}" if bot else f"{APP_URL}/?join={g['code']}"}
+            for g in groups
+        ],
         # До подтверждения учитель видит только имя.
-        "requests": [{"id": r["id"], "name": json.loads(r["data"])["name"], "created": r["asked"]} for r in rows if r["status"] == "pending"],
+        "requests": [{"id": r["id"], "name": json.loads(r["data"])["name"], "group": r["grp"], "created": r["asked"]} for r in rows if r["status"] == "pending"],
         "students": [
-            {"data": json.loads(r["data"]), "updated": r["updated"], "consent": r["consent"] is not None}
+            {"data": json.loads(r["data"]), "group": r["grp"], "updated": r["updated"], "consent": r["consent"] is not None}
             for r in rows if r["status"] == "active"
         ],
         "inbox": [sub_json(r) for r in subs],
@@ -863,6 +981,19 @@ def answer_request(sid: Id, body: AcceptIn, me: Me):
             notify(my_pupil(c, me, sid)["tg_id"], "Учитель принял вас в группу.")
         else:
             c.execute("DELETE FROM links WHERE student=?", (sid,))
+    return {"ok": True}
+
+
+class MoveIn(BaseModel):
+    group: Id
+
+
+@app.patch("/api/teacher/students/{sid}")
+def move(sid: Id, body: MoveIn, me: Me):
+    with db() as c:
+        my_pupil(c, me, sid)
+        my_group(c, me, body.group)
+        c.execute("UPDATE links SET grp=? WHERE student=?", (body.group, sid))
     return {"ok": True}
 
 

@@ -50,8 +50,8 @@ export function SettingsScreen({ student, onAddStudent }: { student: Student; on
 
   return (
     <div className="screen">
+      <AccountCard />
       <TeacherCard key={student.id} student={student} />
-      <AccountCard name={student.name} />
       <InstallCard />
       <section className="card">
         <label>
@@ -210,10 +210,11 @@ function TeacherEntry() {
   const { account } = useSync();
   const [name, setName] = useState(account?.name ?? "");
   const { busy, failed, job } = useJob();
+  if (!account) return null;
   return (
     <section className="card form">
       <h3>{t("cab_title")}</h3>
-      {account?.role === "teacher" ? (
+      {account.role === "teacher" ? (
         <button className="ghost" onClick={() => setRole("teacher")}>
           {t("cab_open")}
         </button>

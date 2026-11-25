@@ -1,13 +1,30 @@
 import { useEffect, useState } from "react";
 import { AccountCard, useJob } from "../components/AccountCard";
 import { InstallCard } from "../components/InstallCard";
+import { Qr } from "../components/Qr";
 import { useMeta, useSurahs, useT } from "../hooks";
 import { LANG_NAMES, type Key } from "../i18n";
 import { Icon, type IconName } from "../icons";
 import { revision, todayKey } from "../method";
 import { verseSpanLabel } from "../mushaf";
 import { setLang, setRole, setTheme, useAppState } from "../store";
-import { answerRequest, checkInPerson, expelStudent, refreshBox, renameMe, sendVerdict, useSync, type RemoteSub, type TeacherBox } from "../sync";
+import {
+  answerRequest,
+  checkInPerson,
+  createGroup,
+  deleteGroup,
+  expelStudent,
+  moveStudent,
+  refreshBox,
+  renameGroup,
+  renameMe,
+  renewGroupLink,
+  sendVerdict,
+  useSync,
+  type Group,
+  type RemoteSub,
+  type TeacherBox,
+} from "../sync";
 import type { Lang, LineRange, MushafMeta, Student, SubmissionKind, Theme } from "../types";
 import { CheckScreen } from "./CheckScreen";
 import { JournalScreen } from "./JournalScreen";
@@ -32,6 +49,7 @@ export function TeacherApp() {
   const { box, boxFailed, account } = useSync();
   const [tab, setTab] = useState<Tab>("inbox");
   const [pupil, setPupil] = useState<string | null>(null);
+  const [group, setGroup] = useState<string | null>(null);
   const [check, setCheck] = useState<Check | null>(null);
 
   // Пока кабинет открыт, новые сдачи приходят сами; во время проверки список не трогаем.
@@ -56,7 +74,7 @@ export function TeacherApp() {
 
   const open = box?.students.find((s) => s.data.id === pupil);
   if (open) {
-    return <PupilScreen pupil={open} inbox={box!.inbox.filter((x) => x.student === open.data.id)} onCheck={setCheck} onClose={() => setPupil(null)} />;
+    return <PupilScreen pupil={open} groups={box!.groups} inbox={box!.inbox.filter((x) => x.student === open.data.id)} onCheck={setCheck} onClose={() => setPupil(null)} />;
   }
 
   return (
@@ -69,7 +87,7 @@ export function TeacherApp() {
         {tab !== "settings" && !box && <p className="muted pad">{t(boxFailed ? "net_fail" : "loading")}</p>}
         {tab !== "settings" && box && boxFailed && <p className="pad" role="alert">{t("cab_stale")}</p>}
         {tab === "inbox" && box && <Inbox box={box} onCheck={setCheck} goGroup={() => setTab("group")} />}
-        {tab === "group" && box && <Group box={box} onOpen={setPupil} />}
+        {tab === "group" && box && <GroupTab box={box} group={group} setGroup={setGroup} onOpen={setPupil} />}
         {tab === "settings" && <TeacherSettings />}
       </main>
       <nav className="tabs tabs-3">
@@ -142,6 +160,7 @@ function SubList({ box, subs, onCheck }: { box: TeacherBox | Pupil[]; subs: Remo
   const surahs = useSurahs();
   const { lang } = useAppState();
   const pupils = Array.isArray(box) ? box : box.students;
+  const groups = Array.isArray(box) ? [] : box.groups;
   if (!subs.length) return null;
   return (
     <ul className="list">
@@ -153,6 +172,7 @@ function SubList({ box, subs, onCheck }: { box: TeacherBox | Pupil[]; subs: Remo
             <button className="list-row" onClick={() => onCheck({ student: p.data, kind: s.kind, ranges: s.ranges, groups: s.groups, sub: s })}>
               <span className="list-main">
                 <b>{p.data.name}</b>
+                {groups.length > 1 && <span className="muted">{groups.find((g) => g.id === p.group)?.name}</span>}
                 <span>
                   {t(`kind_${s.kind}` as Key)}, {verseSpanLabel(s.fromVerse, s.toVerse, surahs, lang)}
                 </span>
@@ -176,7 +196,10 @@ function Requests({ box }: { box: TeacherBox }) {
       {failed && <p role="alert">{t("net_fail")}</p>}
       {box.requests.map((r) => (
         <div key={r.id} className="request">
-          <b>{r.name}</b>
+          <span className="list-main">
+            <b>{r.name}</b>
+            {box.groups.length > 1 && <span className="muted">{box.groups.find((g) => g.id === r.group)?.name}</span>}
+          </span>
           <div className="row">
             <button className="small" disabled={busy} onClick={() => job(() => answerRequest(r.id, true))}>
               {t("cab_accept")}
@@ -223,38 +246,132 @@ function Where({ s }: { s: Student }) {
   return <span>{t("cab_next", { p: h.cur.page })}</span>;
 }
 
-function Group({ box, onOpen }: { box: TeacherBox; onOpen: (id: string) => void }) {
+/** Одна группа: ссылка, QR, переименовать, новая ссылка, удалить пустую. */
+function GroupCard({ group, empty, only }: { group: Group; empty: boolean; only: boolean }) {
   const t = useT();
-  const when = useWhen();
   const [copied, setCopied] = useState(false);
-  const link = box.link ?? `${location.origin}/?join=${box.code}`;
+  const [qr, setQr] = useState(false);
+  const [name, setName] = useState(group.name);
+  const { busy, failed, job } = useJob();
   return (
-    <div className="screen">
-      <Requests box={box} />
-      <section className="card">
-        <h3>{t("cab_code")}</h3>
-        <div className="code-box">
-          <b dir="ltr">{box.code}</b>
-        </div>
-        <p className="muted">{t("cab_codeNote")}</p>
+    <section className="card">
+      <h3>{group.name}</h3>
+      <p className="muted">{t("grp_note")}</p>
+      <div className="row">
         <button
-          className="ghost wide"
           onClick={async () => {
             try {
-              await navigator.clipboard.writeText(link);
+              await navigator.clipboard.writeText(group.link);
               setCopied(true);
             } catch {
-              prompt(t("cab_copy"), link);
+              prompt(t("cab_copy"), group.link);
             }
           }}
         >
           {t(copied ? "cab_copied" : "cab_copy")}
         </button>
-      </section>
-      {!box.students.length && <p className="muted">{t("cab_noStudents")}</p>}
-      {box.students.length > 0 && (
+        <button className="ghost" aria-expanded={qr} onClick={() => setQr(!qr)}>
+          {t(qr ? "grp_hideQr" : "grp_qr")}
+        </button>
+      </div>
+      {qr && <Qr text={group.link} label={`${t("grp_qr")}: ${group.name}`} />}
+      <details className="more">
+        <summary>{t("grp_more")}</summary>
+        <form
+          className="code-form"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void job(() => renameGroup(group.id, name.trim()));
+          }}
+        >
+          <label>
+            {t("grp_name")}
+            <input value={name} maxLength={80} onChange={(e) => setName(e.target.value)} />
+          </label>
+          {failed && <p role="alert">{t("net_fail")}</p>}
+          {name.trim() && name.trim() !== group.name && <button disabled={busy}>{t("save")}</button>}
+        </form>
+        <button
+          className="link"
+          disabled={busy}
+          onClick={async () => {
+            if (confirm(t("grp_renewConfirm")) && (await job(() => renewGroupLink(group.id)))) setCopied(false);
+          }}
+        >
+          {t("grp_renew")}
+        </button>
+        {!only &&
+          (empty ? (
+            <p>
+              <button className="link danger" disabled={busy} onClick={() => job(() => deleteGroup(group.id))}>
+                {t("grp_delete")}
+              </button>
+            </p>
+          ) : (
+            <p className="muted small-note">{t("grp_deleteNote")}</p>
+          ))}
+      </details>
+    </section>
+  );
+}
+
+function GroupTab({
+  box,
+  group,
+  setGroup,
+  onOpen,
+}: {
+  box: TeacherBox;
+  group: string | null;
+  setGroup: (id: string) => void;
+  onOpen: (id: string) => void;
+}) {
+  const t = useT();
+  const when = useWhen();
+  const [adding, setAdding] = useState(false);
+  const [name, setName] = useState("");
+  const { busy, failed, job } = useJob();
+  const cur = box.groups.find((g) => g.id === group) ?? box.groups[0];
+  const pupils = cur ? box.students.filter((p) => p.group === cur.id) : [];
+  const asking = cur ? box.requests.filter((r) => r.group === cur.id) : [];
+  return (
+    <div className="screen">
+      <Requests box={box} />
+      <div className="groups">
+        {box.groups.map((g) => (
+          <button key={g.id} className={`chip ${g.id === cur?.id ? "on" : ""}`} aria-pressed={g.id === cur?.id} onClick={() => setGroup(g.id)}>
+            {g.name} ({box.students.filter((p) => p.group === g.id).length})
+          </button>
+        ))}
+        <button className="link" aria-expanded={adding} onClick={() => setAdding(!adding)}>
+          {t("grp_add")}
+        </button>
+      </div>
+      {adding && (
+        <form
+          className="card form"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void job(async () => {
+              setGroup((await createGroup(name.trim())).id);
+              setName("");
+              setAdding(false);
+            });
+          }}
+        >
+          <label>
+            {t("grp_name")}
+            <input value={name} maxLength={80} placeholder={t("grp_namePh")} onChange={(e) => setName(e.target.value)} />
+          </label>
+          {failed && <p role="alert">{t("net_fail")}</p>}
+          <button disabled={busy || !name.trim()}>{t("grp_create")}</button>
+        </form>
+      )}
+      {cur && <GroupCard key={`${cur.id}${cur.link}`} group={cur} empty={!pupils.length && !asking.length} only={box.groups.length === 1} />}
+      {cur && !pupils.length && <p className="muted">{t("cab_noStudents")}</p>}
+      {pupils.length > 0 && (
         <ul className="list">
-          {box.students.map((p) => (
+          {pupils.map((p) => (
             <li key={p.data.id}>
               <button className="list-row col" onClick={() => onOpen(p.data.id)}>
                 <span className="list-top">
@@ -290,7 +407,16 @@ function todaysWork(s: Student, meta: MushafMeta): Check[] {
   return out;
 }
 
-function PupilScreen({ pupil, inbox, onCheck, onClose }: { pupil: Pupil; inbox: RemoteSub[]; onCheck: (c: Check) => void; onClose: () => void }) {
+function PupilScreen({
+  pupil,
+  groups,
+  inbox,
+  onCheck,
+  onClose,
+}: {
+  pupil: Pupil;
+  groups: Group[];
+  inbox: RemoteSub[]; onCheck: (c: Check) => void; onClose: () => void }) {
   const t = useT();
   const when = useWhen();
   const s = pupil.data;
@@ -348,6 +474,18 @@ function PupilScreen({ pupil, inbox, onCheck, onClose }: { pupil: Pupil; inbox: 
       {part === "journal" ? <JournalScreen student={s} /> : <ProgressScreen student={s} />}
       <div className="screen">
         {failed && <p role="alert">{t("net_fail")}</p>}
+        {groups.length > 1 && (
+          <label>
+            {t("cab_group")}
+            <select value={pupil.group} disabled={busy} onChange={(e) => job(() => moveStudent(s.id, e.target.value))}>
+              {groups.map((g) => (
+                <option key={g.id} value={g.id}>
+                  {g.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         <button
           className="link danger"
           disabled={busy}
@@ -402,7 +540,7 @@ function TeacherSettings() {
           </select>
         </label>
       </section>
-      <AccountCard name={name} />
+      <AccountCard />
       <section className="card">
         <h3>{t("cab_selfTitle")}</h3>
         <p className="muted">{t("cab_selfNote")}</p>

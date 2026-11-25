@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { InstallCard } from "../components/InstallCard";
-import { TeacherCard } from "../components/TeacherCard";
+import { InviteCard, TeacherCard } from "../components/TeacherCard";
 import { useMeta, useNow, usePages, useSurahs, useT } from "../hooks";
 import { dayPart, naziraTargetPages, nextLessonRange, revision, todayKey } from "../method";
 import { verseSpanLabel, versesOfRange } from "../mushaf";
@@ -106,9 +106,9 @@ export function TodayScreen({ student, go }: Props) {
   if (!meta) return <p className="muted pad">{t("loading")}</p>;
   return (
     <>
-      {((joinCode && !link) || link?.status === "pending") && (
+      {(joinCode || link?.status === "pending") && (
         <div className="screen">
-          <TeacherCard student={student} />
+          {joinCode ? <InviteCard key={joinCode} student={student} code={joinCode} /> : <TeacherCard student={student} />}
         </div>
       )}
       {student.stage === "nazira" ? <Nazira s={student} meta={meta} go={go} /> : <Hifz s={student} meta={meta} go={go} />}

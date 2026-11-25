@@ -12,18 +12,18 @@ import type { LineRange, Student, Submission, SubmissionKind } from "./types";
 
 const KEY = "quran-platform:auth";
 const JOIN = "quran-platform:join";
+const LOGIN = "quran-platform:login";
 
 export interface Account {
   id: string;
   name: string;
   role: "student" | "teacher" | null;
-  code: string | null;
-  telegram: boolean;
 }
 
 export interface Link {
   student: string;
   teacher: string;
+  group: string;
   status: "pending" | "active";
   consent: boolean;
 }
@@ -55,12 +55,25 @@ export interface RemoteSub extends SubMeta {
   verdict?: VerdictIn & { errors: number; notes: number };
 }
 
+export interface Group {
+  id: string;
+  name: string;
+  link: string;
+}
+
 export interface TeacherBox {
-  code: string | null;
-  link: string | null;
-  requests: { id: string; name: string; created: number }[];
-  students: { data: Student; updated: number; consent: boolean }[];
+  groups: Group[];
+  requests: { id: string; name: string; group: string; created: number }[];
+  students: { data: Student; group: string; updated: number; consent: boolean }[];
   inbox: RemoteSub[];
+}
+
+/** Вход на сайте, который ждёт подтверждения в боте. */
+export interface WebLogin {
+  poll: string;
+  number: number;
+  link: string;
+  until: number;
 }
 
 interface Auth {
@@ -84,8 +97,10 @@ export interface SyncState {
   waiting: RemoteSub[];
   box: TeacherBox | null;
   boxFailed: boolean;
-  /** Код учителя из ссылки или введённый при первом входе. */
+  /** Ссылка группы, по которой пришли. */
   joinCode: string | null;
+  /** Ждём «Да, это я» в боте. */
+  login: WebLogin | null;
 }
 
 export class ApiError extends Error {
@@ -125,13 +140,18 @@ function loadAuth(): Auth | null {
 
 function joinFromUrl(): string | null {
   const code = new URLSearchParams(location.search).get("join");
-  if (code && /^[A-Za-z0-9]{6}$/.test(code)) {
+  if (code && /^[A-Za-z0-9]{6,16}$/.test(code)) {
     write(JOIN, code.toUpperCase());
     const url = new URL(location.href);
     url.searchParams.delete("join");
     history.replaceState(null, "", url);
   }
   return read<string>(JOIN);
+}
+
+function freshLogin(): WebLogin | null {
+  const l = read<WebLogin>(LOGIN);
+  return l && l.until > Date.now() ? l : null;
 }
 
 let auth = loadAuth();
@@ -143,6 +163,7 @@ let state: SyncState = {
   box: null,
   boxFailed: false,
   joinCode: joinFromUrl(),
+  login: freshLogin(),
 };
 const listeners = new Set<() => void>();
 
@@ -197,24 +218,50 @@ function enter(r: { token: string; account: Account }) {
   saveAuth();
 }
 
-/** Войти: в Telegram сразу, в браузере завести аккаунт с этим именем. */
-export async function signIn(name: string) {
-  if (auth) return;
-  const initData = telegramInitData();
-  enter(initData ? await api("POST", "/auth/telegram", { initData }) : await api("POST", "/auth/new", { name: name.trim() || "—" }));
+async function entered(r: { token: string; account: Account }) {
+  enter(r);
+  if (r.account.role === "teacher" && !getState().students.length) setRole("teacher");
   await run();
 }
 
-/** Войти по коду с другого устройства. */
-export async function signInByCode(code: string) {
-  enter(await api("POST", "/auth/redeem", { code, initData: telegramInitData() }));
-  if (state.account?.role === "teacher" && !getState().students.length) setRole("teacher");
-  await run();
+/** Войти внутри Telegram. */
+export async function signInTelegram() {
+  if (!auth) await entered(await api("POST", "/auth/telegram", { initData: telegramInitData() ?? "" }));
 }
 
-export function loginCode(): Promise<{ code: string; seconds: number }> {
-  return api("POST", "/auth/code");
+/** Начать вход на сайте: бот спросит «Это вы входите?». */
+export async function startLogin() {
+  const r = await api<{ poll: string; number: number; link: string; seconds: number }>("POST", "/auth/web");
+  setLogin({ poll: r.poll, number: r.number, link: r.link, until: Date.now() + r.seconds * 1000 });
 }
+
+export function setLogin(login: WebLogin | null) {
+  write(LOGIN, login);
+  set({ login });
+}
+
+/** Один круг ожидания (до 20 секунд). */
+export async function waitLogin(l: WebLogin): Promise<"waiting" | "in" | "declined" | "expired"> {
+  let r: { token?: string; account?: Account; declined?: boolean };
+  try {
+    // Телефон мог усыпить страницу вместе с запросом: зависший ответ не ждём.
+    const hung = new Promise<never>((_, no) => setTimeout(() => no(new Error("timeout")), 35_000));
+    r = await Promise.race([api<typeof r>("POST", "/login/poll", { poll: l.poll }), hung]);
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 410) return "expired";
+    throw e;
+  }
+  if (r.declined) return "declined";
+  if (!r.token || !r.account) return "waiting";
+  // Пока ждали, вход могли отменить или начать заново.
+  if (state.login?.poll !== l.poll) return "expired";
+  setLogin(null);
+  await entered({ token: r.token, account: r.account });
+  return "in";
+}
+
+/** Выйти на всех остальных устройствах. */
+export const signOutOthers = () => api("POST", "/auth/logout-others");
 
 export async function signOut() {
   await run();
@@ -242,7 +289,6 @@ async function patchMe(patch: { name?: string; role?: "student" | "teacher" }) {
 export const renameMe = (name: string) => patchMe({ name });
 
 export async function becomeTeacher(name: string) {
-  await signIn(name);
   await patchMe({ role: "teacher", ...(name.trim() ? { name: name.trim() } : {}) });
   setRole("teacher");
 }
@@ -405,8 +451,15 @@ export function setJoinCode(code: string | null) {
   set({ joinCode: code });
 }
 
-export function findTeacher(code: string): Promise<{ name: string }> {
-  return api("GET", `/teachers/${encodeURIComponent(code.trim())}`);
+export interface Invite {
+  teacher: string;
+  group: string;
+  /** Ссылка своей же группы. */
+  own: boolean;
+}
+
+export function findInvite(code: string): Promise<Invite> {
+  return api("GET", `/invites/${encodeURIComponent(code)}`);
 }
 
 export async function joinTeacher(student: string, code: string, consent: boolean) {
@@ -466,10 +519,22 @@ async function teacherDo(method: string, path: string, body?: unknown) {
 }
 
 export const answerRequest = (id: string, accept: boolean) => teacherDo("POST", `/students/${id}`, { accept });
+export const moveStudent = (id: string, group: string) => teacherDo("PATCH", `/students/${id}`, { group });
 export const expelStudent = (id: string) => teacherDo("DELETE", `/students/${id}`);
 export const sendVerdict = (sub: string, v: VerdictIn) => teacherDo("POST", `/submissions/${sub}`, v);
 export const checkInPerson = (student: string, meta: SubMeta, verdict: VerdictIn) =>
   teacherDo("POST", `/students/${student}/check`, { meta, verdict });
+
+async function groupDo<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const r = await api<T>(method, `/groups${path}`, body);
+  await refreshBox();
+  return r;
+}
+
+export const createGroup = (name: string) => groupDo<{ id: string }>("POST", "", { name });
+export const renameGroup = (id: string, name: string) => groupDo("PATCH", `/${id}`, { name });
+export const renewGroupLink = (id: string) => groupDo("POST", `/${id}/link`);
+export const deleteGroup = (id: string) => groupDo("DELETE", `/${id}`);
 
 // ---------- запуск ----------
 

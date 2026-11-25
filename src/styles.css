@@ -950,24 +950,57 @@ textarea {
 .request p {
   margin: 0;
 }
-.code-input {
-  text-transform: uppercase;
-  letter-spacing: 0.12em;
-  font-variant-numeric: tabular-nums;
+a.button {
+  display: block;
+  text-align: center;
+  text-decoration: none;
+  border-radius: 12px;
+  padding: 12px 16px;
+  background: var(--accent);
+  color: var(--accent-text);
+  font-weight: 600;
 }
-.code-box {
+.login-wait {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.login-wait p {
+  margin: 0;
+}
+.login-number b {
+  font-size: 30px;
+  font-variant-numeric: tabular-nums;
+  vertical-align: -0.15em;
+}
+.qr {
+  display: block;
+  width: min(100%, 320px);
+  border-radius: 10px;
+  margin: 12px auto 0;
+}
+.login-wait .qr {
+  width: 200px;
+  margin: 0;
+}
+.invite {
+  display: flex;
+  flex-direction: column;
+}
+.invite b {
+  font-size: 20px;
+}
+.groups {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
-  gap: 4px 14px;
-  margin: 4px 0 10px;
+  gap: 8px;
 }
-.code-box b {
-  font-size: 30px;
-  letter-spacing: 0.08em;
-  font-variant-numeric: tabular-nums;
-  user-select: all;
-  -webkit-user-select: all;
+.groups .chip {
+  padding: 10px 16px;
+  font-size: 15px;
+}
+.groups .chip.on {
+  background: var(--soft);
 }
 details.more {
   margin-top: 10px;
@@ -976,9 +1009,6 @@ details.more > summary {
   cursor: pointer;
   padding: 8px 0;
   color: var(--accent);
-}
-.join-field {
-  margin-top: 12px;
 }
 label.consent {
   align-items: flex-start;
@@ -1112,4 +1142,11 @@ button.link.inline {
 .switch button.on {
   color: var(--text);
   border-color: var(--accent);
+}
+/* На телефоне QR для входа не нужен: Telegram открывается кнопкой. */
+@media (max-width: 700px) {
+  .login-wait .qr,
+  .login-wait .qr-note {
+    display: none;
+  }
 }

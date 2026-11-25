@@ -49,7 +49,8 @@ VERDICT = {"marks": {"2:0:1": 1, "2:1:0": 2}, "grade": 3, "passed": True, "comme
 
 class User:
     def __init__(self, name="Имя"):
-        self.use(http.post("/api/auth/new", json={"name": name}).json())
+        self.tg = int(uid("")[-4:]) + 1000
+        self.use(http.post("/api/auth/telegram", json={"initData": init_data(self.tg, name=name)}).json())
 
     def use(self, r):
         self.token, self.account = r["token"], r["account"]
@@ -65,7 +66,10 @@ class User:
 
     def teacher(self):
         self.account = self("PATCH", "/me", json={"role": "teacher"}).json()
-        return self.account["code"]
+        return self.codes()[0]
+
+    def codes(self):
+        return [g["link"].split("join_")[1] for g in self("GET", "/teacher").json()["groups"]]
 
     def send(self, sid, meta=META, data=b"voice", mime="audio/webm"):
         return self("POST", f"/students/{sid}/submissions", data={"meta": json.dumps(meta)}, files={"audio": ("a", data, mime)})
@@ -100,7 +104,7 @@ def test_telegram():
 
 
 def test_needs_sign_in():
-    for m, p in [("GET", "/sync"), ("GET", "/teacher"), ("DELETE", "/me"), ("POST", "/auth/code")]:
+    for m, p in [("GET", "/sync"), ("GET", "/teacher"), ("DELETE", "/me"), ("POST", "/auth/logout-others")]:
         assert http.request(m, "/api" + p).status_code == 401
         assert http.request(m, "/api" + p, headers={"Authorization": "Bearer zzz"}).status_code == 401
 
@@ -154,11 +158,11 @@ def test_strangers():
 def test_request_shows_only_name():
     t, s = User("Устаз"), User()
     code, sid = t.teacher(), s.add()
-    assert s("GET", f"/teachers/{code.lower()}").json() == {"name": "Устаз"}
+    assert s("GET", f"/invites/{code.lower()}").json() == {"teacher": "Устаз", "group": "Моя группа", "own": False}
     assert s("POST", f"/students/{sid}/join", json={"code": "nope", "consent": True}).status_code == 404
     s("POST", f"/students/{sid}/join", json={"code": code, "consent": True})
     box = t("GET", "/teacher").json()
-    assert box["students"] == [] and set(box["requests"][0]) == {"id", "name", "created"}
+    assert box["students"] == [] and set(box["requests"][0]) == {"id", "name", "group", "created"}
     assert s.send(sid).status_code == 409
     t("POST", f"/teacher/students/{sid}", json={"accept": False})
     assert s("GET", "/sync").json()["links"] == []
@@ -169,7 +173,7 @@ def test_send_and_check():
     sub = s.send(sid).json()["id"]
     box = t("GET", "/teacher").json()
     assert [x["id"] for x in box["inbox"]] == [sub] and box["students"][0]["data"]["name"] == "Али"
-    assert box["link"].endswith("?start=join_" + box["code"])
+    assert box["groups"][0]["link"].startswith("https://t.me/test_bot?start=join_")
     for u in (t, s):
         a = u("GET", f"/submissions/{sub}/audio")
         assert a.content == b"voice" and a.headers["content-type"] == "audio/mp4"
@@ -275,39 +279,123 @@ def test_delete_account():
     assert files() == before and s("GET", "/sync").json()["links"] == []
 
 
-def test_login_code():
-    a, b = User("A"), User("B")
-    sid = a.add()
-    c = a("POST", "/auth/code").json()["code"]
-    assert http.post("/api/auth/redeem", json={"code": "WRONG123"}).status_code == 404
-    r = http.post("/api/auth/redeem", json={"code": c[:4].lower() + " " + c[4:]})
-    assert r.json()["account"]["id"] == a.account["id"]
-    assert http.post("/api/auth/redeem", json={"code": c}).status_code == 404
-    b.use(r.json())
-    assert b("GET", "/sync").json()["students"][0]["id"] == sid
+BOT = {"x-bot": api.bot_secret()}
 
 
-def test_login_code_expires():
-    a = User()
-    c = a("POST", "/auth/code").json()["code"]
+def web():
+    api.POLL_SECONDS = 1
+    r = http.post("/api/auth/web").json()
+    return r, r["link"].split("login_")[1]
+
+
+def poll(r):
+    return http.post("/api/login/poll", json={"poll": r["poll"]})
+
+
+def test_web_login():
+    u = User("Али")
+    r, start = web()
+    assert poll(r).json() == {"waiting": True}
+    assert http.post("/internal/login", json={"start": start}, headers=BOT).json() == {"number": r["number"]}
+    ok = http.post("/internal/login/answer", json={"start": start, "tg_id": u.tg, "name": "Али", "yes": True}, headers=BOT)
+    assert ok.status_code == 200
+    got = poll(r).json()
+    assert got["account"]["id"] == u.account["id"]
+    u.use(got)
+    assert u("GET", "/sync").status_code == 200
+    # Оборвавшийся запрос не съедает вход, но подтвердить второй раз нельзя.
+    assert poll(r).json()["account"]["id"] == u.account["id"]
+    assert http.post("/internal/login/answer", json={"start": start, "tg_id": 1, "yes": True}, headers=BOT).status_code == 404
+
+
+def test_web_login_new_person():
+    r, start = web()
+    http.post("/internal/login/answer", json={"start": start, "tg_id": 987654, "name": "Новый", "yes": True}, headers=BOT)
+    assert poll(r).json()["account"]["name"] == "Новый"
+
+
+def test_web_login_declined_and_expired():
+    r, start = web()
+    http.post("/internal/login/answer", json={"start": start}, headers=BOT)
+    assert poll(r).json() == {"declined": True}
+    r, start = web()
     with api.db() as d:
-        d.execute("UPDATE login_codes SET expires=1")
-    assert http.post("/api/auth/redeem", json={"code": c}).status_code == 404
+        d.execute("UPDATE logins SET expires=1")
+    assert poll(r).status_code == 410
+    assert http.post("/internal/login", json={"start": start}, headers=BOT).status_code == 404
 
 
-def test_merge_accounts():
-    a, b = User("A"), User("B")
-    ta = a.teacher()
-    tb, sa, sb = b.teacher(), a.add(), b.add()
-    pupil = User()
-    ps = pupil.add()
-    pupil("POST", f"/students/{ps}/join", json={"code": tb, "consent": True})
-    c = a("POST", "/auth/code").json()["code"]
-    b.use(b("POST", "/auth/redeem", json={"code": c, "initData": init_data(77)}).json())
-    assert b.account["id"] == a.account["id"] and b.account["code"] == ta and b.account["telegram"]
-    assert {x["id"] for x in b("GET", "/sync").json()["students"]} == {sa, sb}
-    assert [x["id"] for x in a("GET", "/teacher").json()["requests"]] == [ps]
-    assert http.post("/api/auth/telegram", json={"initData": init_data(77)}).json()["account"]["id"] == a.account["id"]
+def test_internal_is_closed():
+    r, start = web()
+    for h in ({}, {"x-bot": "bad"}):
+        assert http.post("/internal/login", json={"start": start}, headers=h).status_code == 403
+        assert http.post("/internal/login/answer", json={"start": start, "tg_id": 1, "yes": True}, headers=h).status_code == 403
+    # Ключ из ссылки бота не даёт войти: ждать можно только по секрету сайта.
+    assert http.post("/api/login/poll", json={"poll": start}).status_code == 410
+
+
+def test_logout_others():
+    u = User()
+    old = u.token
+    u.use(http.post("/api/auth/telegram", json={"initData": init_data(u.tg)}).json())
+    assert u("POST", "/auth/logout-others").status_code == 200
+    assert u("GET", "/sync").status_code == 200
+    u.token = old
+    assert u("GET", "/sync").status_code == 401
+
+
+def test_groups():
+    t, s, sid = pair()
+    first = t("GET", "/teacher").json()["groups"][0]
+    second = t("POST", "/groups", json={"name": "Вечер"}).json()["id"]
+    assert [g["name"] for g in t("GET", "/teacher").json()["groups"]] == ["Моя группа", "Вечер"]
+    assert s("POST", "/groups", json={"name": "x"}).status_code == 403
+    # Перевод в другую группу и переход по второй ссылке не требуют нового подтверждения.
+    assert t("PATCH", f"/teacher/students/{sid}", json={"group": second}).status_code == 200
+    assert t("GET", "/teacher").json()["students"][0]["group"] == second
+    assert s("GET", "/sync").json()["links"][0]["group"] == "Вечер"
+    s("POST", f"/students/{sid}/join", json={"code": t.codes()[0], "consent": True})
+    link = s("GET", "/sync").json()["links"][0]
+    assert link["group"] == "Моя группа" and link["status"] == "active"
+    assert t("DELETE", f"/groups/{first['id']}").status_code == 409
+    assert t("DELETE", f"/groups/{second}").status_code == 200
+    t("PATCH", f"/groups/{first['id']}", json={"name": "Утро"})
+    old = t.codes()[0]
+    t("POST", f"/groups/{first['id']}/link")
+    assert t.codes()[0] != old and s("GET", f"/invites/{old}").status_code == 404
+    assert t("GET", "/teacher").json()["students"][0]["data"]["id"] == sid
+    x = User()
+    x.teacher()
+    for m, p, j in [("PATCH", "", {"name": "y"}), ("DELETE", "", None), ("POST", "/link", None)]:
+        assert x(m, f"/groups/{first['id']}{p}", json=j).status_code == 404
+    other = x("GET", "/teacher").json()["groups"][0]["id"]
+    assert t("PATCH", f"/teacher/students/{sid}", json={"group": other}).status_code == 404
+
+
+def test_migration(tmp_path):
+    """База прежней версии: код учителя становится ссылкой его группы, связи сохраняются."""
+    import sqlite3
+    import subprocess
+    import sys
+
+    c = sqlite3.connect(tmp_path / "quran.db")
+    c.executescript("""
+      CREATE TABLE accounts (id TEXT PRIMARY KEY, tg_id INTEGER UNIQUE, name TEXT NOT NULL, role TEXT, teacher_code TEXT UNIQUE, created INTEGER NOT NULL);
+      CREATE TABLE login_codes (hash TEXT PRIMARY KEY);
+      CREATE TABLE students (id TEXT PRIMARY KEY, account TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE, data TEXT, rev INTEGER NOT NULL, updated INTEGER NOT NULL, deleted INTEGER NOT NULL DEFAULT 0);
+      CREATE TABLE links (student TEXT PRIMARY KEY REFERENCES students(id) ON DELETE CASCADE, teacher TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE, status TEXT NOT NULL, consent INTEGER, created INTEGER NOT NULL);
+      INSERT INTO accounts VALUES ('t',1,'Устаз','teacher','ABC234',1),('s',2,'Ученик',NULL,NULL,1);
+      INSERT INTO students VALUES ('student1','s','{}',1,1,0);
+      INSERT INTO links VALUES ('student1','t','active',5,1);
+    """)
+    c.commit()
+    c.close()
+    env = {**os.environ, "API_DATA": str(tmp_path)}
+    for _ in range(2):  # второй запуск ничего не меняет
+        subprocess.run([sys.executable, "-c", "import api"], check=True, env=env, cwd=os.path.dirname(os.path.abspath(__file__)))
+    c = sqlite3.connect(tmp_path / "quran.db")
+    assert c.execute("SELECT g.code, g.teacher, l.status, l.consent FROM links l JOIN groups g ON g.id=l.grp").fetchall() == [("ABC234", "t", "active", 5)]
+    assert c.execute("SELECT COUNT(*) FROM groups").fetchone() == (1,)
 
 
 def test_purge():

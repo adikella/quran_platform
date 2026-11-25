@@ -1,10 +1,7 @@
 import { useEffect, useState } from "react";
 import { useT } from "../hooks";
-import { useSync } from "../sync";
-import { LoginCode } from "./AccountCard";
 import { promptInstall, useInstallWay } from "../install";
-import { exportJson } from "../store";
-import { haptic, tg } from "../telegram";
+import { tg } from "../telegram";
 
 const HIDE = "quran-install-hidden";
 
@@ -20,10 +17,8 @@ function hidden() {
 export function InstallCard({ dismissible }: { dismissible?: boolean }) {
   const t = useT();
   const way = useInstallWay();
-  const { account } = useSync();
   const [gone, setGone] = useState(hidden);
   const [failed, setFailed] = useState(false);
-  const [copied, setCopied] = useState<"ok" | "fail" | null>(null);
 
   useEffect(() => {
     const onFail = () => setFailed(true);
@@ -33,15 +28,6 @@ export function InstallCard({ dismissible }: { dismissible?: boolean }) {
 
   if (way === "done" || (dismissible && gone)) return null;
 
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(exportJson());
-      setCopied("ok");
-      haptic("success");
-    } catch {
-      setCopied("fail");
-    }
-  };
   const inTg = way === "telegram" || way === "telegram-desktop";
   const viaBrowser = way === "telegram-desktop" || failed;
 
@@ -66,19 +52,10 @@ export function InstallCard({ dismissible }: { dismissible?: boolean }) {
       {inTg && (
         <details open={viaBrowser}>
           <summary>{t("install_computer")}</summary>
-          <p className="muted">{t(account ? "install_code" : "install_transfer")}</p>
-          {account && <LoginCode />}
-          <div className="row">
-            {!account && (
-              <button className="ghost" onClick={copy}>
-                {t("install_copy")}
-              </button>
-            )}
-            <button className="ghost" onClick={() => tg?.openLink?.(location.origin + location.pathname)}>
-              {t("install_open")}
-            </button>
-          </div>
-          {copied && <p role="status">{t(copied === "ok" ? "install_copied" : "install_copyFail")}</p>}
+          <p className="muted">{t("install_other")}</p>
+          <button className="ghost" onClick={() => tg?.openLink?.(location.origin + location.pathname)}>
+            {t("install_open")}
+          </button>
         </details>
       )}
       {dismissible && (
