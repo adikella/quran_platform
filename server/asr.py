@@ -4,7 +4,7 @@
   ct2-transformers-converter --model tarteel-ai/whisper-base-ar-quran --quantization int8 \
     --output_dir /var/lib/quran-asr/ct2/whisper-base-ar-quran \
     --copy_files tokenizer_config.json preprocessor_config.json normalizer.json added_tokens.json
-На процессоре Ampere (3 ядра) режим int8_float32 самый быстрый: около 5 секунд на каждые 30 секунд записи.
+На процессоре Ampere режим int8_float32 самый быстрый. Одно ядро: около 8,5 секунды на каждые 30 секунд записи.
 
 Сравнение с текстом мусхафа делает приложение: здесь только распознавание.
 Записи не сохраняются: файл читается в память, расшифровывается и забывается.
@@ -26,7 +26,7 @@ MAX_SECONDS = 6 * 60
 RATE = 16000
 
 model = WhisperModel(MODEL_DIR, device="cpu", compute_type="int8_float32", cpu_threads=int(os.environ.get("ASR_THREADS", "3")))
-# Одна расшифровка за раз: ядер мало, параллельно было бы только медленнее.
+# Одна расшифровка за раз: ядро одно, параллельно было бы только медленнее.
 lock = threading.Lock()
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 

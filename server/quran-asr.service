@@ -7,7 +7,7 @@ Wants=network-online.target
 User=quran-asr
 WorkingDirectory=/opt/quran-asr
 Environment=HF_HOME=/var/lib/quran-asr/hf
-Environment=ASR_THREADS=3
+Environment=ASR_THREADS=1
 ExecStart=/opt/quran-asr/venv/bin/uvicorn asr:app --app-dir /opt/quran-asr --host 127.0.0.1 --port 8090 --workers 1
 Restart=always
 RestartSec=10
@@ -16,7 +16,9 @@ ProtectSystem=strict
 ProtectHome=true
 ReadWritePaths=/var/lib/quran-asr
 PrivateTmp=true
-MemoryMax=6G
+MemoryMax=4G
+# Одно ядро на всё: распознавание уступает сайту и боту.
+Nice=10
 
 [Install]
 WantedBy=multi-user.target
