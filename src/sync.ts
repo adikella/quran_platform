@@ -6,9 +6,10 @@
 import { useSyncExternalStore } from "react";
 import { mergeStudents, settle } from "./merge";
 import { loadMeta } from "./mushaf";
+import { makePlan, type PlanItem } from "./plan";
 import { adoptStudent, changeStudent, getState, removeStudent, renewStudent, setRole, subscribe } from "./store";
 import { telegramUserId, telegramInitData } from "./telegram";
-import type { LineRange, Student, Submission, SubmissionKind } from "./types";
+import type { LineRange, MushafId, Student, Submission, SubmissionKind } from "./types";
 
 const KEY = "quran-platform:auth";
 const JOIN = "quran-platform:join";
@@ -26,6 +27,23 @@ export interface Link {
   group: string;
   status: "pending" | "active";
   consent: boolean;
+  /** Напарник: принимает недавнее и давнее. Записи ему разрешаются отдельно. */
+  partner: string | null;
+  partnerConsent: boolean;
+}
+
+/** У кого я напарник: имя и что сегодня сдаётся. */
+export interface Mate {
+  student: string;
+  /** Какой из моих учеников напарник. */
+  mine: string;
+  name: string;
+  mushaf: MushafId;
+  maxErrors: number;
+  sabki: PlanItem | null;
+  manzil: PlanItem | null;
+  done: { sabki?: string; manzil?: string };
+  inbox: RemoteSub[];
 }
 
 /** Что сдаётся: так сдача выглядит на сервере. */
@@ -52,7 +70,9 @@ export interface RemoteSub extends SubMeta {
   student: string;
   audio: boolean;
   created: number;
-  verdict?: VerdictIn & { errors: number; notes: number };
+  /** Отправлено напарнику, а не учителю. */
+  partner?: boolean;
+  verdict?: VerdictIn & { errors: number; notes: number; by?: "teacher" | "partner" };
 }
 
 export interface Group {
@@ -64,7 +84,7 @@ export interface Group {
 export interface TeacherBox {
   groups: Group[];
   requests: { id: string; name: string; group: string; created: number }[];
-  students: { data: Student; group: string; updated: number; consent: boolean }[];
+  students: { data: Student; group: string; updated: number; consent: boolean; partner: string | null }[];
   inbox: RemoteSub[];
 }
 
@@ -82,11 +102,12 @@ interface Auth {
   /** Кому в Telegram принадлежит вход: на одном телефоне бывает два аккаунта Telegram. */
   tgUser?: number;
   /** Что уже есть на сервере: номер версии и updatedAt отправленной копии. */
-  synced: Record<string, { rev: number; stamp: number | undefined }>;
+  synced: Record<string, { rev: number; stamp: number | undefined; plan?: string }>;
   /** Ученики, удалённые здесь, но ещё не на сервере. */
   deletes: string[];
   links: Link[];
   waiting: RemoteSub[];
+  mates?: Mate[];
 }
 
 export interface SyncState {
@@ -95,6 +116,7 @@ export interface SyncState {
   status: "off" | "busy" | "ok" | "offline" | "error";
   links: Link[];
   waiting: RemoteSub[];
+  mates: Mate[];
   box: TeacherBox | null;
   boxFailed: boolean;
   /** Ссылка группы, по которой пришли. */
@@ -160,6 +182,7 @@ let state: SyncState = {
   status: auth ? "busy" : "off",
   links: auth?.links ?? [],
   waiting: auth?.waiting ?? [],
+  mates: auth?.mates ?? [],
   box: null,
   boxFailed: false,
   joinCode: joinFromUrl(),
@@ -174,7 +197,7 @@ function set(patch: Partial<SyncState>) {
 
 function saveAuth() {
   write(KEY, auth);
-  set({ account: auth?.account ?? null, links: auth?.links ?? [], waiting: auth?.waiting ?? [] });
+  set({ account: auth?.account ?? null, links: auth?.links ?? [], waiting: auth?.waiting ?? [], mates: auth?.mates ?? [] });
 }
 
 export function useSync(): SyncState {
@@ -335,12 +358,14 @@ async function exchange() {
       links: Link[];
       waiting: RemoteSub[];
       verdicts: RemoteSub[];
+      partnerOf: Mate[];
     }>("GET", "/sync");
     if (gone()) return;
     const a = auth!;
     a.account = r.account;
     a.links = r.links;
     a.waiting = r.waiting;
+    a.mates = r.partnerOf;
     for (const id of r.deleted) {
       if (getState().students.some((s) => s.id === id)) {
         // Не с этого входа: ученика удалили, а потом вернули из сохранённой копии.
@@ -356,6 +381,8 @@ async function exchange() {
     let bad = false;
     for (const s of getState().students) {
       bad = !(await push(a, s.id)) || bad;
+      if (gone()) return;
+      await pushPlan(a, s.id);
       if (gone()) return;
     }
     saveAuth();
@@ -378,7 +405,7 @@ function receive(a: Auth, id: string, rev: number, doc: Student) {
     const merged = mergeStudents(local, doc);
     adoptStudent({ ...merged, updatedAt: Date.now() });
   } else return;
-  a.synced[id] = { rev, stamp: doc.updatedAt };
+  a.synced[id] = { ...a.synced[id], rev, stamp: doc.updatedAt };
 }
 
 /** Отправить ученика, если он изменился. false: сервер его не принял. */
@@ -390,7 +417,7 @@ async function push(a: Auth, id: string): Promise<boolean> {
     if (known && known.stamp === s.updatedAt) return true;
     try {
       const { rev } = await api<{ rev: number }>("PUT", `/students/${id}`, { rev: known?.rev ?? 0, data: s });
-      a.synced[id] = { rev, stamp: s.updatedAt };
+      a.synced[id] = { ...a.synced[id], rev, stamp: s.updatedAt };
       return true;
     } catch (e) {
       if (!(e instanceof ApiError)) throw e;
@@ -402,6 +429,24 @@ async function push(a: Auth, id: string): Promise<boolean> {
     }
   }
   return false;
+}
+
+/** Отправить план повторения, если он изменился. Неудача не мешает обмену: план уйдёт в следующий раз. */
+async function pushPlan(a: Auth, id: string) {
+  const s = getState().students.find((x) => x.id === id);
+  const known = a.synced[id];
+  if (!s || !known) return;
+  try {
+    const meta = await loadMeta(s.mushaf);
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone ?? "";
+    const plan = makePlan(s, meta, getState().lang, tz);
+    const text = JSON.stringify(plan);
+    if (known.plan === text) return;
+    await api("PUT", `/students/${id}/plan`, plan);
+    if (a.synced[id]) a.synced[id].plan = text;
+  } catch {
+    /* в следующий раз */
+  }
 }
 
 /** Ученик после решения учителя: запись в дневнике и, если принято, дальше по мусхафу. */
@@ -421,7 +466,7 @@ async function withVerdict(st: Student, v: RemoteSub): Promise<(s: Student) => S
     grade,
     passed,
     seconds: v.seconds ?? 0,
-    by: "teacher",
+    by: v.verdict!.by ?? "teacher",
     ...(Object.keys(marks).length ? { marks } : {}),
     ...(comment ? { comment } : {}),
   };
@@ -469,8 +514,8 @@ export async function joinTeacher(student: string, code: string, consent: boolea
   await run();
 }
 
-export async function setConsent(student: string, consent: boolean) {
-  await api("PATCH", `/students/${student}/join`, { consent });
+export async function setConsent(student: string, patch: { consent?: boolean; partnerConsent?: boolean }) {
+  await api("PATCH", `/students/${student}/join`, patch);
   await run();
 }
 
@@ -520,10 +565,21 @@ async function teacherDo(method: string, path: string, body?: unknown) {
 
 export const answerRequest = (id: string, accept: boolean) => teacherDo("POST", `/students/${id}`, { accept });
 export const moveStudent = (id: string, group: string) => teacherDo("PATCH", `/students/${id}`, { group });
+export const setPartner = (id: string, partner: string | null) => teacherDo("PATCH", `/students/${id}`, { partner });
 export const expelStudent = (id: string) => teacherDo("DELETE", `/students/${id}`);
 export const sendVerdict = (sub: string, v: VerdictIn) => teacherDo("POST", `/submissions/${sub}`, v);
 export const checkInPerson = (student: string, meta: SubMeta, verdict: VerdictIn) =>
   teacherDo("POST", `/students/${student}/check`, { meta, verdict });
+
+// ---------- напарник ----------
+
+async function mateDo(path: string, body: unknown) {
+  await api("POST", `/partner${path}`, body);
+  await run();
+}
+
+export const mateVerdict = (sub: string, v: VerdictIn) => mateDo(`/submissions/${sub}`, v);
+export const mateInPerson = (student: string, meta: SubMeta, verdict: VerdictIn) => mateDo(`/students/${student}/check`, { meta, verdict });
 
 async function groupDo<T>(method: string, path: string, body?: unknown): Promise<T> {
   const r = await api<T>(method, `/groups${path}`, body);
@@ -552,5 +608,5 @@ export function startSync() {
   document.addEventListener("visibilitychange", wake);
   window.addEventListener("online", wake);
   // Пока приложение открыто, решение учителя приходит само.
-  setInterval(() => document.visibilityState === "visible" && (state.waiting.length || state.links.length) && void run(), 60_000);
+  setInterval(() => document.visibilityState === "visible" && (state.waiting.length || state.links.length || state.mates.length) && void run(), 60_000);
 }

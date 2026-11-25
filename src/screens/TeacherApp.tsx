@@ -5,8 +5,10 @@ import { Qr } from "../components/Qr";
 import { useMeta, useSurahs, useT } from "../hooks";
 import { LANG_NAMES, type Key } from "../i18n";
 import { Icon, type IconName } from "../icons";
+import { nextLesson } from "../learned";
 import { revision, todayKey } from "../method";
 import { verseSpanLabel } from "../mushaf";
+import { rangesText, rangeText } from "../ranges";
 import { setLang, setRole, setTheme, useAppState } from "../store";
 import {
   answerRequest,
@@ -20,6 +22,7 @@ import {
   renameMe,
   renewGroupLink,
   sendVerdict,
+  setPartner,
   useSync,
   type Group,
   type RemoteSub,
@@ -29,7 +32,7 @@ import type { Lang, LineRange, MushafMeta, Student, SubmissionKind, Theme } from
 import { CheckScreen } from "./CheckScreen";
 import { JournalScreen } from "./JournalScreen";
 import { ProgressScreen } from "./ProgressScreen";
-import { rangeText, rangesText } from "./TodayScreen";
+
 
 type Tab = "inbox" | "group" | "settings";
 const TABS: Tab[] = ["inbox", "group", "settings"];
@@ -74,7 +77,7 @@ export function TeacherApp() {
 
   const open = box?.students.find((s) => s.data.id === pupil);
   if (open) {
-    return <PupilScreen pupil={open} groups={box!.groups} inbox={box!.inbox.filter((x) => x.student === open.data.id)} onCheck={setCheck} onClose={() => setPupil(null)} />;
+    return <PupilScreen pupil={open} mates={box!.students.filter((s) => s.group === open.group && s.data.id !== open.data.id)} groups={box!.groups} inbox={box!.inbox.filter((x) => x.student === open.data.id)} onCheck={setCheck} onClose={() => setPupil(null)} />;
   }
 
   return (
@@ -95,7 +98,7 @@ export function TeacherApp() {
           <button key={k} className={tab === k ? "on" : ""} aria-current={tab === k ? "page" : undefined} onClick={() => setTab(k)}>
             <span className="ico">
               <Icon name={k as IconName} />
-              {k === "inbox" && box && box.inbox.length + box.requests.length > 0 && <b className="count">{box.inbox.length + box.requests.length}</b>}
+              {k === "inbox" && box && count(box) > 0 && <b className="count">{count(box)}</b>}
             </span>
             <span>{t(`cab_${k}` as Key)}</span>
           </button>
@@ -104,6 +107,10 @@ export function TeacherApp() {
     </div>
   );
 }
+
+/** Что ждёт самого учителя: отправленное напарнику сюда не входит. */
+const forTeacher = (box: TeacherBox) => box.inbox.filter((x) => !x.partner);
+const count = (box: TeacherBox) => forTeacher(box).length + box.requests.length;
 
 function TeacherCheck({ check, onClose }: { check: Check; onClose: () => void }) {
   const t = useT();
@@ -142,13 +149,13 @@ function Inbox({ box, onCheck, goGroup }: { box: TeacherBox; onCheck: (c: Check)
   return (
     <div className="screen">
       <Requests box={box} />
-      {!box.inbox.length && !box.requests.length && (
+      {!count(box) && (
         <div className="empty">
           <p>{t(box.students.length ? "cab_empty" : "cab_noStudents")}</p>
           {!box.students.length && <button onClick={goGroup}>{t("cab_invite")}</button>}
         </div>
       )}
-      <SubList box={box} subs={box.inbox} onCheck={onCheck} />
+      <SubList box={box} subs={forTeacher(box)} onCheck={onCheck} />
     </div>
   );
 }
@@ -175,6 +182,7 @@ function SubList({ box, subs, onCheck }: { box: TeacherBox | Pupil[]; subs: Remo
                 <span>
                   {t(`kind_${s.kind}` as Key)}, {verseSpanLabel(s.fromVerse, s.toVerse, surahs, lang)}
                 </span>
+                {s.partner && <span className="muted">{t("mate_hasIt")}</span>}
               </span>
               <span className="muted">{when(s.created)}</span>
             </button>
@@ -242,7 +250,8 @@ function Where({ s }: { s: Student }) {
   if (s.stage === "nazira") return <span>{t("cab_reads", { p: s.nazira.next })}</span>;
   if (h.pending) return <span>{t("cab_ready", { r: rangeText(h.pending, lines(h.pending.page), t) })}</span>;
   if (h.lesson) return <span>{t("cab_learning", { r: rangeText(h.lesson.range, lines(h.lesson.range.page), t) })}</span>;
-  return <span>{t("cab_next", { p: h.cur.page })}</span>;
+  const next = nextLesson(s, meta);
+  return <span>{next ? t("cab_next", { p: next.page }) : t("hifzFinished")}</span>;
 }
 
 /** Одна группа: ссылка, QR, переименовать, новая ссылка, удалить пустую. */
@@ -408,12 +417,14 @@ function todaysWork(s: Student, meta: MushafMeta): Check[] {
 
 function PupilScreen({
   pupil,
+  mates,
   groups,
   inbox,
   onCheck,
   onClose,
 }: {
   pupil: Pupil;
+  mates: Pupil[];
   groups: Group[];
   inbox: RemoteSub[]; onCheck: (c: Check) => void; onClose: () => void }) {
   const t = useT();
@@ -472,7 +483,20 @@ function PupilScreen({
       </div>
       {part === "journal" ? <JournalScreen student={s} /> : <ProgressScreen student={s} />}
       <div className="screen">
-        {failed && <p role="alert">{t("net_fail")}</p>}
+        {failed && <p role="alert">{t(failed === "gone" ? "mate_cannot" : "net_fail")}</p>}
+        {(mates.length > 0 || pupil.partner) && (
+          <label>
+            {t("mate_pick")}
+            <select value={pupil.partner ?? ""} disabled={busy} onChange={(e) => job(() => setPartner(s.id, e.target.value || null))}>
+              <option value="">{t("mate_none")}</option>
+              {mates.map((p) => (
+                <option key={p.data.id} value={p.data.id}>
+                  {p.data.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         {groups.length > 1 && (
           <label>
             {t("cab_group")}

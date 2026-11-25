@@ -12,6 +12,7 @@ import urllib.parse
 
 os.environ["API_DATA"] = tempfile.mkdtemp()
 os.environ["BOT_TOKEN"] = "1:test"
+os.environ["REMIND"] = "0"
 
 import api  # noqa: E402
 import pytest  # noqa: E402
@@ -430,3 +431,214 @@ def test_transcode(tmp_path):
 def test_doc_may_have_empty_name():
     u = User()
     u.add(name="")
+
+
+# ---------- напарник и напоминания ----------
+
+PART = [{"page": 1, "from": 0, "to": 7}]
+MANZIL = {**META, "kind": "manzil", "ranges": PART, "fromVerse": "1:1", "toVerse": "1:7", "groups": 1}
+PLAN = {
+    "head": "Сегодня повторить", "sabki": {"text": "Недавнее: стр. 2", "ranges": [{"page": 2, "from": 0, "to": 6}]},
+    "manzil": {"text": "Давнее: джуз 1", "ranges": PART, "groups": 1}, "done": {}, "at": "08:00", "tz": "Asia/Almaty",
+}
+
+
+def trio(partner_consent=True):
+    """Учитель, ученик и его напарник в одной группе."""
+    t, s, sid = pair()
+    p = User("Напарник")
+    pid = p.add(name="Вали")
+    p("POST", f"/students/{pid}/join", json={"code": t.codes()[0], "consent": False})
+    t("POST", f"/teacher/students/{pid}", json={"accept": True})
+    assert t("PATCH", f"/teacher/students/{sid}", json={"partner": pid}).status_code == 200
+    if partner_consent:
+        assert s("PATCH", f"/students/{sid}/join", json={"partnerConsent": True}).status_code == 200
+    return t, s, sid, p, pid
+
+
+def mates(u):
+    return u("GET", "/sync").json()["partnerOf"]
+
+
+def test_partner_gets_revision_only():
+    t, s, sid, p, pid = trio()
+    s("PUT", f"/students/{sid}/plan", json=PLAN)
+    link = s("GET", "/sync").json()["links"][0]
+    assert link["partner"] == "Вали" and link["partnerConsent"]
+    sub = s.send(sid, MANZIL).json()["id"]
+    assert sent[-1][0] == p.tg
+    assert s.send(sid, META).status_code == 200
+    assert sent[-1][0] == t.tg
+    m = mates(p)[0]
+    assert [x["id"] for x in m["inbox"]] == [sub] and m["manzil"]["ranges"] == PART
+    # Напарник не видит дневника: только имя и что сдаётся.
+    assert set(m) == {"student", "mine", "name", "mushaf", "maxErrors", "sabki", "manzil", "done", "inbox"}
+    assert p("GET", f"/submissions/{sub}/audio").status_code == 200
+    box = {x["kind"]: x for x in t("GET", "/teacher").json()["inbox"]}
+    assert box["manzil"]["partner"] and not box["sabak"]["partner"]
+    assert p("GET", f"/submissions/{box['sabak']['id']}/audio").status_code == 404
+    assert p("POST", f"/partner/submissions/{box['sabak']['id']}", json=VERDICT).status_code == 404
+    assert p("POST", f"/partner/submissions/{sub}", json={**VERDICT, "marks": {}}).status_code == 200
+    v = s("GET", "/sync").json()["verdicts"][0]
+    assert v["id"] == sub and v["verdict"]["by"] == "partner"
+    assert mates(p)[0]["done"] == {"manzil": "2026-11-25"}
+    # Проверил: больше не слышит. Учитель слышит.
+    assert p("GET", f"/submissions/{sub}/audio").status_code == 404
+    assert t("GET", f"/submissions/{sub}/audio").status_code == 200
+
+
+def test_partner_consent():
+    t, s, sid, p, pid = trio(partner_consent=False)
+    assert s.send(sid, MANZIL).status_code == 403
+    assert s.send(sid, META).status_code == 200
+    s("PATCH", f"/students/{sid}/join", json={"partnerConsent": True})
+    before = files()
+    assert s.send(sid, MANZIL).status_code == 200
+    s("PATCH", f"/students/{sid}/join", json={"partnerConsent": False})
+    assert files() == before and mates(p)[0]["inbox"] == []
+    s("PATCH", f"/students/{sid}/join", json={"partnerConsent": True})
+    s("PATCH", f"/students/{sid}/join", json={"consent": False})
+    link = s("GET", "/sync").json()["links"][0]
+    assert not link["consent"] and not link["partnerConsent"] and link["partner"]
+    s("PATCH", f"/students/{sid}/join", json={"partnerConsent": True})
+    assert not s("GET", "/sync").json()["links"][0]["partnerConsent"]
+
+
+def test_partner_in_person():
+    t, s, sid, p, pid = trio(partner_consent=False)
+    body = {"meta": MANZIL, "verdict": {**VERDICT, "marks": {}}}
+    assert p("POST", f"/partner/students/{sid}/check", json={**body, "meta": META}).status_code == 403
+    assert p("POST", f"/partner/students/{sid}/check", json=body).status_code == 200
+    assert s("GET", "/sync").json()["verdicts"][0]["verdict"]["by"] == "partner"
+    assert User()("POST", f"/partner/students/{sid}/check", json=body).status_code == 404
+    # Наоборот нельзя: ученик не принимает у своего напарника.
+    assert s("POST", f"/partner/students/{pid}/check", json=body).status_code == 404
+
+
+def test_partner_rules():
+    t, s, sid, p, pid = trio()
+    other = s.add()
+    s("POST", f"/students/{other}/join", json={"code": t.codes()[0], "consent": False})
+    t("POST", f"/teacher/students/{other}", json={"accept": True})
+    assert t("PATCH", f"/teacher/students/{sid}", json={"partner": sid}).status_code == 409
+    assert t("PATCH", f"/teacher/students/{sid}", json={"partner": other}).status_code == 409
+    assert User()("PATCH", f"/teacher/students/{sid}", json={"partner": pid}).status_code == 404
+    t2, _, sid2 = pair()
+    assert t("PATCH", f"/teacher/students/{sid}", json={"partner": sid2}).status_code == 404
+
+
+@pytest.mark.parametrize("how", ["teacher", "group", "partner leaves", "partner deleted", "partner account"])
+def test_partner_ends(how):
+    t, s, sid, p, pid = trio()
+    sub = s.send(sid, MANZIL).json()["id"]
+    if how == "teacher":
+        t("PATCH", f"/teacher/students/{sid}", json={"partner": None})
+    elif how == "group":
+        g = t("POST", "/groups", json={"name": "Вторая"}).json()["id"]
+        assert t("PATCH", f"/teacher/students/{sid}", json={"group": g}).status_code == 200
+    elif how == "partner leaves":
+        p("DELETE", f"/students/{pid}/join")
+    elif how == "partner deleted":
+        p("DELETE", f"/students/{pid}")
+    else:
+        p("DELETE", "/me")
+    link = s("GET", "/sync").json()["links"][0]
+    assert link["partner"] is None and link["status"] == "active"
+    # Сдача не пропала: её проверит учитель, а бывший напарник не слышит.
+    box = t("GET", "/teacher").json()["inbox"]
+    assert [(x["id"], x["partner"]) for x in box] == [(sub, False)]
+    if how != "partner account":
+        assert p("GET", f"/submissions/{sub}/audio").status_code == 404
+        assert p("POST", f"/partner/submissions/{sub}", json=VERDICT).status_code == 404
+        assert mates(p) == []
+    assert t("POST", f"/teacher/submissions/{sub}", json=VERDICT).status_code == 200
+
+
+def test_group_kept_keeps_partner():
+    t, s, sid, p, pid = trio()
+    g = t("GET", "/teacher").json()["students"][0]["group"]
+    t("PATCH", f"/teacher/students/{sid}", json={"group": g})
+    assert s("GET", "/sync").json()["links"][0]["partner"] == "Вали"
+
+
+def at(hm, day="2026-11-26"):
+    from datetime import datetime, timedelta, timezone
+    return int(datetime.fromisoformat(f"{day}T{hm}:00").replace(tzinfo=timezone(timedelta(hours=5))).timestamp())
+
+
+def reminders(u):
+    return [text for tg, text in sent if tg == u.tg]
+
+
+def test_reminder():
+    s = User()
+    sid = s.add()
+    assert s("PUT", f"/students/{sid}/plan", json=PLAN).status_code == 200
+    for hm in ("07:59", "08:11"):
+        api.remind(at(hm))
+    assert reminders(s) == []
+    api.remind(at("08:00"))
+    api.remind(at("08:01"))
+    assert reminders(s) == ["Сегодня повторить\nНедавнее: стр. 2\nДавнее: джуз 1"]
+    # На другой день снова, но уже без сданного.
+    s("PUT", f"/students/{sid}/plan", json={**PLAN, "done": {"sabki": "2026-11-27"}})
+    api.remind(at("08:05", "2026-11-27"))
+    assert reminders(s)[1:] == ["Сегодня повторить\nДавнее: джуз 1"]
+    s("PUT", f"/students/{sid}/plan", json={**PLAN, "done": {"sabki": "2026-11-28", "manzil": "2026-11-28"}})
+    api.remind(at("08:05", "2026-11-28"))
+    s("PUT", f"/students/{sid}/plan", json={**PLAN, "at": ""})
+    api.remind(at("08:05", "2026-11-29"))
+    assert len(reminders(s)) == 2
+
+
+def test_reminder_silent_when_sent_or_muted():
+    t, s, sid = pair()
+    s("PUT", f"/students/{sid}/plan", json=PLAN)
+    n = len(reminders(s))
+    s.send(sid, {**MANZIL, "date": "2026-11-26"})
+    api.remind(at("08:00"))
+    assert reminders(s)[n:] == ["Сегодня повторить\nНедавнее: стр. 2"]
+    bot = {"x-bot": api.bot_secret()}
+    assert s.tg in http.post("/internal/personal", headers=bot).json()["ids"]
+    http.post("/internal/mute", headers=bot, json={"tg_id": s.tg, "muted": True})
+    api.remind(at("08:00", "2026-11-27"))
+    assert len(reminders(s)) == n + 1
+    http.post("/internal/mute", headers=bot, json={"tg_id": s.tg, "muted": False})
+    api.remind(at("08:00", "2026-11-28"))
+    assert len(reminders(s)) == n + 2
+    for path in ("/internal/personal", "/internal/mute"):
+        assert http.post(path, json={"tg_id": s.tg, "muted": True}).status_code == 403
+
+
+def test_reminder_names_only_for_several_children():
+    s = User()
+    a, b = s.add(name="Али"), s.add(name="Вали")
+    s("PUT", f"/students/{a}/plan", json=PLAN)
+    api.remind(at("08:00"))
+    assert reminders(s)[-1].startswith("Али\n")
+
+
+@pytest.mark.parametrize("bad", [{"at": "25:00"}, {"at": "8:00"}, {"manzil": {"text": "", "ranges": [{"page": 605, "from": 0, "to": 5}]}}, {"done": {"sabak": "2026-11-26"}}])
+def test_bad_plan(bad):
+    s = User()
+    sid = s.add()
+    assert s("PUT", f"/students/{sid}/plan", json={**PLAN, **bad}).status_code == 422
+    assert User()("PUT", f"/students/{sid}/plan", json=PLAN).status_code == 404
+
+
+def test_unknown_zone_is_almaty():
+    s = User()
+    sid = s.add()
+    assert s("PUT", f"/students/{sid}/plan", json={**PLAN, "tz": "../etc/passwd"}).status_code == 200
+    api.remind(at("08:00"))
+    assert len(reminders(s)) == 1
+
+
+def test_doc_parts():
+    u = User()
+    ok = {**student("x")["hifz"], "parts": {"583": [[0, 7]]}, "manzilAt": 41}
+    sid = u.add(hifz=ok)
+    assert u("GET", "/sync").json()["students"][0]["data"]["hifz"]["parts"] == {"583": [[0, 7]]}
+    for parts in ({"605": [[0, 1]]}, {"x": [[0, 1]]}, {"5": [[0]]}, {"5": [[0, 99]]}):
+        bad = student(sid, hifz={**ok, "parts": parts})
+        assert u("PUT", f"/students/{sid}", json={"rev": 1, "data": bad}).status_code == 422

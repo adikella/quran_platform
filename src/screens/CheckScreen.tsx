@@ -13,7 +13,7 @@ import { haptic } from "../telegram";
 import type { LineRange, MushafMeta, Student, Submission, SubmissionKind } from "../types";
 
 interface Props {
-  student: Student;
+  student: Pick<Student, "id" | "name" | "mushaf"> & { method: Pick<Student["method"], "maxErrors"> };
   kind: SubmissionKind;
   ranges: LineRange[];
   groups?: number;
@@ -47,7 +47,11 @@ export function CheckScreen({ student, kind, ranges, groups, meta, onClose, link
   const byHeart = kind !== "nazira";
   // Новый урок и чтение у записанного к учителю принимает только учитель; недавнее и давнее можно и самому.
   const teacherOnly = !review && !!link && (kind === "sabak" || kind === "nazira");
-  const canSend = !review && !!link?.consent;
+  // Недавнее и давнее принимает напарник, а если его нет, учитель. Самому можно только потренироваться.
+  const practice = !review && !!link && !teacherOnly;
+  const toPartner = practice && !!link.partner;
+  const receiver = (toPartner ? link.partner : link?.teacher) ?? "";
+  const canSend = !review && !!(toPartner ? link?.partnerConsent : link?.consent);
   const [open, setOpen] = useState(!byHeart || !!review);
   const [recording, setRecording] = useState(false);
   const [offer, setOffer] = useState(false);
@@ -240,7 +244,7 @@ export function CheckScreen({ student, kind, ranges, groups, meta, onClose, link
     if (m && review) void deliver(() => review.onVerdict(m, { marks, ...preview, comment: comment.trim() }));
   };
 
-  const closedHint = teacherOnly || canSend ? "check_closedTeacher" : "check_closed";
+  const closedHint = toPartner && canSend ? "check_closedPartner" : teacherOnly || canSend ? "check_closedTeacher" : "check_closed";
 
   return (
     <div className="screen check" ref={top}>
@@ -272,9 +276,10 @@ export function CheckScreen({ student, kind, ranges, groups, meta, onClose, link
         </section>
       )}
       {teacherOnly && !canSend && <p className="card">{t("check_inPerson")}</p>}
+      {practice && !canSend && <p className="card">{t(toPartner ? "check_inPersonPartner" : "check_inPersonRevision", { name: receiver })}</p>}
       {!review && (!teacherOnly || canSend) && (
       <Recorder
-        note={canSend ? t(teacherOnly ? "rec_noteTeacher" : "rec_noteEither") : undefined}
+        note={canSend ? t(teacherOnly ? "rec_noteTeacher" : toPartner ? "rec_notePartner" : "rec_noteEither") : undefined}
         watch={byHeart ? watch : undefined}
         onSilence={setOffer}
         onRecording={onRecording}
@@ -287,7 +292,7 @@ export function CheckScreen({ student, kind, ranges, groups, meta, onClose, link
       {canSend && audio && (
         <section className="send-teacher">
           <button className="wide" onClick={send} disabled={post === "busy" || !data}>
-            {t(post === "busy" ? "send_busy" : "send_teacher", { name: link!.teacher })}
+            {t(post === "busy" ? "send_busy" : toPartner ? "send_partner" : "send_teacher", { name: receiver })}
           </button>
         </section>
       )}
@@ -296,7 +301,7 @@ export function CheckScreen({ student, kind, ranges, groups, meta, onClose, link
       {post === "gone" && <p role="alert">{t(review ? "send_goneTeacher" : "send_gone")}</p>}
       {!open && !recording && !teacherOnly && (
         <button className="ghost" onClick={() => setOpen(true)}>
-          {t(canSend && audio ? "check_self" : "check_open")}
+          {t(practice ? "check_train" : canSend && audio ? "check_self" : "check_open")}
         </button>
       )}
       {audio && open && !teacherOnly && (
@@ -371,6 +376,8 @@ export function CheckScreen({ student, kind, ranges, groups, meta, onClose, link
               <button onClick={judge} disabled={!data || post === "busy"}>
                 {t(post === "busy" ? "send_busy" : preview.passed ? "review_pass" : "review_fail")}
               </button>
+            ) : practice ? (
+              <span className="muted">{t("check_practice", { name: receiver })}</span>
             ) : (
               <button onClick={finish} disabled={!data || recording}>
                 {t("finishCheck")}
@@ -380,7 +387,7 @@ export function CheckScreen({ student, kind, ranges, groups, meta, onClose, link
         ) : (
           <>
             <span className="muted">
-              {t(peeking ? "check_peeking" : offer ? "check_offer" : recording ? "check_listening" : canSend ? (audio ? "check_sendNow" : "check_startTeacher") : "check_start")}
+              {t(peeking ? "check_peeking" : offer ? "check_offer" : recording ? "check_listening" : canSend ? (audio ? (toPartner ? "check_sendNowPartner" : "check_sendNow") : "check_startTeacher") : "check_start")}
             </span>
             {offer && (
               <button onClick={peek}>
@@ -395,7 +402,7 @@ export function CheckScreen({ student, kind, ranges, groups, meta, onClose, link
         <div className="modal">
           <div className="modal-card">
             <h2>{t(review ? "review_sent" : "send_done")}</h2>
-            <p className="muted">{review ? t("review_sentNote", { name: student.name }) : t("send_doneNote", { name: link?.teacher ?? "" })}</p>
+            <p className="muted">{review ? t("review_sentNote", { name: student.name }) : t("send_doneNote", { name: receiver })}</p>
             <button onClick={onClose}>{t("close")}</button>
           </div>
         </div>

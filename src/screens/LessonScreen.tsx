@@ -128,7 +128,7 @@ export function LessonScreen({ student, onClose, onSubmitNow }: Props) {
           <Icon name="back" size={16} /> {t("back")}
         </button>
         <span className="muted">
-          {t("page")} {page.p} · {t("stepOf", { i: stepIdx + 1, n: steps.length })}
+          {t("page")} {page.p}, {t("stepOf", { i: stepIdx + 1, n: steps.length })}
         </span>
       </header>
 

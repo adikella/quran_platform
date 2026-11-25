@@ -1,16 +1,15 @@
 import { useT } from "../hooks";
 import { manzilBefore, manzilDays, manzilDir, revision } from "../method";
 import { patchStudent, setManzilAt, useAppState } from "../store";
+import { unitText } from "../ranges";
+import { useSync } from "../sync";
 import { DateLine } from "./DateLine";
 import type { ManzilUnit } from "../method";
 import type { Method, MushafMeta, Student } from "../types";
 
 export function useUnitLabel() {
   const t = useT();
-  return (u: ManzilUnit) => {
-    const pages = u.ranges.map((r) => r.page);
-    return t("manzilGroup", { j: u.juz, a: Math.min(...pages), b: Math.max(...pages) });
-  };
+  return (u: ManzilUnit) => unitText(u, t);
 }
 
 /** Круг давнего: сколько в день, в какую сторону, с чего начать. */
@@ -60,7 +59,31 @@ export function ManzilSettings({ student, meta }: { student: Student; meta: Mush
           </select>
         </label>
       )}
+      <Remind student={student} />
     </div>
+  );
+}
+
+/** Утреннее напоминание от бота: только тем, кто вошёл через Telegram. */
+function Remind({ student }: { student: Student }) {
+  const t = useT();
+  const { account } = useSync();
+  const m = student.method;
+  const set = (remindAt: string) => patchStudent(student.id, { method: { ...m, remindAt } });
+  if (!account) return <p className="muted small-note">{t("rm_signIn")}</p>;
+  return (
+    <>
+      <label className="check-row">
+        <input type="checkbox" checked={!!m.remindAt} onChange={(e) => set(e.target.checked ? "08:00" : "")} />
+        <span>{t("rm_on")}</span>
+      </label>
+      {m.remindAt && (
+        <label>
+          {t("rm_at")}
+          <input type="time" required value={m.remindAt} onChange={(e) => e.target.value && set(e.target.value.slice(0, 5))} />
+        </label>
+      )}
+    </>
   );
 }
 

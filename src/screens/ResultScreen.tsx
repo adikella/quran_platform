@@ -40,7 +40,7 @@ export function ResultScreen({ student, sub, onClose }: { student: Student; sub:
       </div>
       {sub.comment && (
         <section className="card">
-          <h3>{t("result_comment")}</h3>
+          <h3>{t(sub.by === "partner" ? "result_commentPartner" : "result_comment")}</h3>
           <p className="said">{sub.comment}</p>
         </section>
       )}

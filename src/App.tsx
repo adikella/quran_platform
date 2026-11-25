@@ -14,7 +14,7 @@ import { SettingsScreen } from "./screens/SettingsScreen";
 import { TeacherApp } from "./screens/TeacherApp";
 import { TodayScreen, type Nav } from "./screens/TodayScreen";
 import { activeStudent, useAppState } from "./store";
-import { useSync } from "./sync";
+import { mateInPerson, mateVerdict, useSync } from "./sync";
 import { telegramTheme } from "./telegram";
 
 type Tab = "today" | "mushaf" | "journal" | "progress" | "settings";
@@ -65,6 +65,7 @@ export function App() {
     }} />;
   }
   if (nav?.name === "result") return <ResultScreen student={student} sub={nav.sub} onClose={close} />;
+  if (nav?.name === "mate") return <MateCheck nav={nav} onClose={close} />;
   if (nav?.name === "check" && meta) {
     return (
       <CheckScreen
@@ -129,5 +130,24 @@ export function App() {
         ))}
       </nav>
     </div>
+  );
+}
+
+/** Напарник принимает недавнее или давнее: текст у него открыт. */
+function MateCheck({ nav, onClose }: { nav: Extract<Nav, { name: "mate" }>; onClose: () => void }) {
+  const t = useT();
+  const { mate, sub } = nav;
+  const meta = useMeta(mate.mushaf);
+  if (!meta) return <p className="muted pad">{t("loading")}</p>;
+  return (
+    <CheckScreen
+      student={{ id: mate.student, name: mate.name, mushaf: mate.mushaf, method: { maxErrors: mate.maxErrors } }}
+      kind={nav.kind}
+      ranges={nav.ranges}
+      groups={nav.groups}
+      meta={meta}
+      onClose={onClose}
+      review={{ sub, onVerdict: (m, v) => (sub ? mateVerdict(sub.id, v) : mateInPerson(mate.student, m, v)) }}
+    />
   );
 }

@@ -529,6 +529,7 @@ label.check-row input {
   background: var(--c-sabki);
 }
 .steps-track span.now {
+  padding: 0;
   background: var(--accent);
 }
 .step-title {
@@ -1232,4 +1233,11 @@ button.link.inline {
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+
+.mate-near {
+  text-align: start;
+}
+.card.accent > button.wide + button.wide {
+  margin-top: 8px;
 }

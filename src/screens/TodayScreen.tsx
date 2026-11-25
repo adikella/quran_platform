@@ -7,9 +7,10 @@ import { ManzilPlan, ManzilSettings, useUnitLabel } from "../components/ManzilSe
 import { nextLesson } from "../learned";
 import { dayPart, naziraTargetPages, revision, todayKey } from "../method";
 import { verseSpanLabel, versesOfRange } from "../mushaf";
+import { rangesText, rangeText } from "../ranges";
 import { beginLesson, lessonReps, startHifz, useAppState } from "../store";
 import { useJob } from "../components/AccountCard";
-import { useSync, withdrawSubmission } from "../sync";
+import { useSync, withdrawSubmission, type Mate, type RemoteSub } from "../sync";
 import type { Key } from "../i18n";
 import type { LineRange, MushafMeta, Student, Submission, SubmissionKind } from "../types";
 
@@ -17,40 +18,12 @@ export type Nav =
   | { name: "lesson" }
   | { name: "check"; kind: SubmissionKind; ranges: LineRange[]; groups?: number }
   | { name: "result"; sub: Submission }
+  | { name: "mate"; mate: Mate; kind: "sabki" | "manzil"; ranges: LineRange[]; groups?: number; sub?: RemoteSub }
   | { name: "read"; kind: SubmissionKind; ranges: LineRange[]; groups?: number };
 
 interface Props {
   student: Student;
   go: (n: Nav) => void;
-}
-
-export function rangeText(r: LineRange, lineCount: number, t: ReturnType<typeof useT>) {
-  if (r.from === 0 && r.to >= lineCount) return `${t("page")} ${r.page}`;
-  return `${t("page")} ${r.page}, ${r.from + 1}–${r.to}`;
-}
-
-/** «Стр. 63, 1–4 · Стр. 53–62»: подряд идущие целые страницы сворачиваются в диапазон. */
-export function rangesText(ranges: LineRange[], lineCount: (p: number) => number, t: ReturnType<typeof useT>) {
-  const parts: string[] = [];
-  let run: number[] = [];
-  const flush = () => {
-    if (!run.length) return;
-    const lo = Math.min(...run);
-    const hi = Math.max(...run);
-    parts.push(lo === hi ? `${t("page")} ${lo}` : `${t("page")} ${lo}–${hi}`);
-    run = [];
-  };
-  for (const r of ranges) {
-    const whole = r.from === 0 && r.to >= lineCount(r.page);
-    if (whole && (!run.length || Math.abs(run[run.length - 1] - r.page) === 1)) run.push(r.page);
-    else {
-      flush();
-      if (whole) run.push(r.page);
-      else parts.push(rangeText(r, lineCount(r.page), t));
-    }
-  }
-  flush();
-  return parts.join("; ");
 }
 
 function lastToday(s: Student, kind: SubmissionKind) {
@@ -62,7 +35,8 @@ function Status({ s, kind }: { s: Student; kind: SubmissionKind }) {
   const t = useT();
   const sub = lastToday(s, kind);
   const { waiting } = useSync();
-  if (waiting.some((w) => w.student === s.id && w.kind === kind)) return <span className="pill wait">{t("wait_pill")}</span>;
+  const sent = waiting.find((w) => w.student === s.id && w.kind === kind);
+  if (sent) return <span className="pill wait">{t(sent.partner ? "wait_pillPartner" : "wait_pill")}</span>;
   if (!sub) return null;
   return (
     <span className={`pill ${sub.passed ? "ok" : "bad"}`}>
@@ -77,10 +51,11 @@ function FromTeacher({ s, kind, go }: { s: Student; kind: SubmissionKind; go: Pr
   const { waiting, links } = useSync();
   const { busy, failed, job } = useJob();
   const mine = waiting.find((w) => w.student === s.id && w.kind === kind);
+  const link = links.find((l) => l.student === s.id);
   if (mine) {
     return (
       <div className="from-teacher">
-        <p className="muted">{t("wait_note", { name: links.find((l) => l.student === s.id)?.teacher ?? "" })}</p>
+        <p className="muted">{t(mine.partner ? "wait_notePartner" : "wait_note", { name: (mine.partner ? link?.partner : link?.teacher) ?? "" })}</p>
         {failed && <p role="alert">{t("net_fail")}</p>}
         <button className="link" disabled={busy} onClick={() => job(() => withdrawSubmission(mine.id))}>
           {t("wait_withdraw")}
@@ -89,13 +64,13 @@ function FromTeacher({ s, kind, go }: { s: Student; kind: SubmissionKind; go: Pr
     );
   }
   const last = [...s.submissions].reverse().find((x) => x.kind === kind);
-  if (last?.by !== "teacher" || !(last.marks || last.comment)) return null;
+  if (!last?.by || !(last.marks || last.comment)) return null;
   // Вчерашнее принятое показывать незачем, а несданное висит до пересдачи.
   if (last.passed && last.date !== todayKey()) return null;
   return (
     <div className="from-teacher">
       <button className="link" onClick={() => go({ name: "result", sub: last })}>
-        {t("result_open")}
+        {t(last.by === "partner" ? "result_openPartner" : "result_open")}
       </button>
     </div>
   );
@@ -114,11 +89,50 @@ export function TodayScreen({ student, go }: Props) {
           {joinCode ? <InviteCard key={joinCode} student={student} code={joinCode} /> : <TeacherCard student={student} />}
         </div>
       )}
+      <Mates student={student} go={go} />
       {student.stage === "nazira" ? <Nazira s={student} meta={meta} go={go} /> : <Hifz s={student} meta={meta} go={go} />}
       <div className="screen">
         <InstallCard dismissible />
       </div>
     </>
+  );
+}
+
+/** Я напарник: что прислали и что принять рядом. */
+function Mates({ student, go }: { student: Student; go: Props["go"] }) {
+  const t = useT();
+  const { mates } = useSync();
+  const { lang } = useAppState();
+  const surahs = useSurahs();
+  const mine = mates.filter((m) => m.mine === student.id);
+  if (!mine.length) return null;
+  const today = todayKey();
+  return (
+    <div className="screen">
+      {mine.map((m) => {
+        const near = (["sabki", "manzil"] as const).filter((k) => m[k] && m.done[k] !== today && !m.inbox.some((x) => x.kind === k));
+        return (
+          <section key={m.student} className="card accent">
+            <h3>{t("mate_of", { name: m.name })}</h3>
+            {m.inbox.map((x) => (
+              <button
+                key={x.id}
+                className="wide"
+                onClick={() => go({ name: "mate", mate: m, kind: x.kind as "sabki" | "manzil", ranges: x.ranges, groups: x.groups, sub: x })}
+              >
+                {t("mate_listen", { k: t(`kind_${x.kind}` as Key), r: verseSpanLabel(x.fromVerse, x.toVerse, surahs, lang) })}
+              </button>
+            ))}
+            {near.map((k) => (
+              <button key={k} className="ghost wide mate-near" onClick={() => go({ name: "mate", mate: m, kind: k, ranges: m[k]!.ranges, groups: m[k]!.groups })}>
+                {t("mate_near", { r: m[k]!.text })}
+              </button>
+            ))}
+            {!m.inbox.length && !near.length && <p className="muted">{t("mate_nothing")}</p>}
+          </section>
+        );
+      })}
+    </div>
   );
 }
 

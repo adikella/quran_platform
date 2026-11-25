@@ -5,12 +5,12 @@ import { ApiError, findInvite, joinTeacher, leaveTeacher, setConsent, setJoinCod
 import type { Student } from "../types";
 import { SignIn, useJob } from "./AccountCard";
 
-function Consent({ on, set, disabled }: { on: boolean; set: (v: boolean) => void; disabled?: boolean }) {
+function Consent({ on, set, disabled, partner }: { on: boolean; set: (v: boolean) => void; disabled?: boolean; partner?: boolean }) {
   const t = useT();
   return (
     <label className="check-row consent">
       <input type="checkbox" checked={on} disabled={disabled} onChange={(e) => set(e.target.checked)} />
-      <span>{t("join_consent")}</span>
+      <span>{t(partner ? "mate_consent" : "join_consent")}</span>
     </label>
   );
 }
@@ -102,7 +102,17 @@ export function TeacherCard({ student }: { student: Student }) {
       {link && (
         <>
           <p>{t(link.status === "active" ? "join_active" : "join_pending", { name: link.teacher, group: link.group })}</p>
-          <Consent on={link.consent} disabled={busy} set={(v) => job(() => setConsent(student.id, v))} />
+          <Consent on={link.consent} disabled={busy} set={(v) => job(() => setConsent(student.id, { consent: v }))} />
+          {link.partner && (
+            <>
+              <p>{t("mate_yours", { name: link.partner })}</p>
+              {link.consent ? (
+                <Consent partner on={link.partnerConsent} disabled={busy} set={(v) => job(() => setConsent(student.id, { partnerConsent: v }))} />
+              ) : (
+                <p className="muted">{t("mate_consentFirst")}</p>
+              )}
+            </>
+          )}
           {failed && <p role="alert">{t("net_fail")}</p>}
           <button
             className="link danger"

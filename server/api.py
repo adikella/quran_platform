@@ -2,12 +2,14 @@
 
 Кто чем управляет:
 - прогресс ученика (students.data) пишет только аккаунт самого ученика; учитель его читает;
-- решение учителя хранится в submissions, приложение ученика забирает его и засчитывает у себя.
+- решение учителя хранится в submissions, приложение ученика забирает его и засчитывает у себя;
+- недавнее и давнее принимает напарник, если учитель его назначил: другой ученик той же группы. Он видит
+  только имя и что сдаётся (students.plan), без дневника и оценок.
 
 Вход только через Telegram. Внутри Telegram подпись initData проверяется токеном бота.
 На сайте: сайт получает ссылку на бота, человек нажимает в боте «Да, это я», и ожидающий сайт входит.
 Учитель видит ученика, только если тот открыл ссылку группы, записался и учитель его принял.
-Запись голоса принимается только с разрешения (links.consent) и удаляется через 30 дней после проверки.
+Запись голоса принимается только с разрешения (links.consent, для напарника отдельно links.partner_consent) и удаляется через 30 дней после проверки.
 """
 
 import asyncio
@@ -23,7 +25,9 @@ import threading
 import time
 import urllib.parse
 import urllib.request
+import zoneinfo
 from contextlib import contextmanager
+from datetime import datetime
 from typing import Annotated, Literal
 
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
@@ -109,6 +113,18 @@ with sqlite3.connect(DB) as _c:
         _c.execute("INSERT INTO groups VALUES (?,?,?,?,?)", (_g, _a, "Моя группа", _code, int(time.time())))
         _c.execute("UPDATE links SET grp=? WHERE teacher=? AND grp IS NULL", (_g, _a))
         _c.execute("UPDATE accounts SET teacher_code=NULL WHERE id=?", (_a,))
+    # Напарник (другой ученик того же учителя), план повторения и напоминания.
+    for _t, _col in [
+        ("links", "partner TEXT REFERENCES students(id) ON DELETE SET NULL"),
+        ("links", "partner_consent INTEGER"),
+        ("submissions", "partner TEXT REFERENCES students(id) ON DELETE SET NULL"),
+        ("students", "plan TEXT"),
+        ("students", "reminded TEXT"),
+        ("accounts", "muted INTEGER NOT NULL DEFAULT 0"),
+    ]:
+        if _col.split()[0] not in {r[1] for r in _c.execute(f"PRAGMA table_info({_t})")}:
+            _c.execute(f"ALTER TABLE {_t} ADD COLUMN {_col}")
+    _c.execute("CREATE INDEX IF NOT EXISTS links_partner ON links(partner)")
 os.chmod(DB, 0o600)
 
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
@@ -167,8 +183,15 @@ class Cur(BaseModel):
     line: int = Field(ge=0, le=20)
 
 
+PageKey = Annotated[str, Field(pattern=r"^[1-9]\d{0,2}$")]
+Line = Annotated[int, Field(ge=0, le=20)]
+Span = tuple[Line, Line]
+
+
 class Hifz(Loose):
     memorized: list[Annotated[int, Field(ge=1, le=610)]] = Field(max_length=700)
+    parts: dict[PageKey, list[Span]] = Field(default={}, max_length=610)
+    manzilAt: Annotated[int, Field(ge=1, le=610)] | None = None
     cur: Cur
     pending: Range | None
     lesson: Lesson | None
@@ -233,7 +256,7 @@ class StudentDoc(Loose):
         h = self.hifz
         ranges = [r for s in self.submissions for r in s.ranges]
         ranges += [x for x in (h.pending, h.lesson.range if h.lesson else None) if x]
-        pages = [*h.memorized, h.cur.page, self.nazira.next, *self.nazira.read, *(r.page for r in ranges)]
+        pages = [*h.memorized, *map(int, h.parts), h.manzilAt or 1, h.cur.page, self.nazira.next, *self.nazira.read, *(r.page for r in ranges)]
         if any(p > last for p in pages):
             raise ValueError("no such page")
         return self
@@ -255,14 +278,35 @@ class Meta(BaseModel):
         return self.model_dump_json(by_alias=True, exclude_none=True)
 
 
+REVISION = ("sabki", "manzil")
+
+
+class PlanItem(BaseModel):
+    text: str = Field(max_length=400)
+    ranges: list[Range] = Field(min_length=1, max_length=200)
+    groups: Annotated[int, Field(ge=1, le=30)] | None = None
+
+
+class Plan(BaseModel):
+    """Что повторять сегодня. Считает приложение ученика: сервер по этому напоминает, а напарник видит, что принять."""
+
+    head: str = Field(max_length=200)
+    sabki: PlanItem | None
+    manzil: PlanItem | None
+    done: dict[Literal["sabki", "manzil"], Date]
+    at: str = Field(pattern=r"^([01]\d:[0-5]\d|2[0-3]:[0-5]\d)?$")
+    tz: str = Field(max_length=64)
+
+
 class Verdict(BaseModel):
     marks: dict[Annotated[str, Field(pattern=r"^\d{1,3}:\d{1,2}:\d{1,2}$")], Literal[1, 2]] = Field(max_length=3000)
     grade: Annotated[int, Field(ge=0, le=10)]
     passed: bool
     comment: str = Field(default="", max_length=500)
 
-    def dump(self) -> str:
+    def dump(self, by: str = "teacher") -> str:
         v = self.model_dump()
+        v["by"] = by
         v["errors"] = sum(1 for m in self.marks.values() if m == 1)
         v["notes"] = sum(1 for m in self.marks.values() if m == 2)
         return json.dumps(v, ensure_ascii=False)
@@ -604,8 +648,9 @@ def sync(me: Me):
     with db() as c:
         rows = c.execute("SELECT * FROM students WHERE account=?", (me["id"],)).fetchall()
         links = c.execute(
-            "SELECT l.*, a.name, g.name AS grp_name FROM links l JOIN students s ON s.id=l.student"
-            " JOIN accounts a ON a.id=l.teacher JOIN groups g ON g.id=l.grp WHERE s.account=?",
+            "SELECT l.*, a.name, g.name AS grp_name, p.data AS partner_data FROM links l JOIN students s ON s.id=l.student"
+            " JOIN accounts a ON a.id=l.teacher JOIN groups g ON g.id=l.grp"
+            " LEFT JOIN students p ON p.id=l.partner WHERE s.account=?",
             (me["id"],),
         ).fetchall()
         subs = c.execute(
@@ -614,12 +659,16 @@ def sync(me: Me):
             (me["id"], now() - 120 * 86400),
         ).fetchall()
         a = c.execute("SELECT * FROM accounts WHERE id=?", (me["id"],)).fetchone()
+        mates = partner_pupils(c, me)
     return {
         "account": account_json(a),
+        "partnerOf": mates,
         "students": [{"id": r["id"], "rev": r["rev"], "data": json.loads(r["data"])} for r in rows if not r["deleted"]],
         "deleted": [r["id"] for r in rows if r["deleted"]],
         "links": [
-            {"student": r["student"], "teacher": r["name"], "group": r["grp_name"], "status": r["status"], "consent": r["consent"] is not None}
+            {"student": r["student"], "teacher": r["name"], "group": r["grp_name"], "status": r["status"], "consent": r["consent"] is not None,
+             "partner": json.loads(r["partner_data"])["name"] if r["partner_data"] else None,
+             "partnerConsent": r["partner_consent"] is not None}
             for r in links
         ],
         "waiting": [sub_json(r) for r in subs if r["status"] == "waiting"],
@@ -630,7 +679,7 @@ def sync(me: Me):
 def sub_json(r: sqlite3.Row) -> dict:
     out = {
         "id": r["id"], "student": r["student"], **json.loads(r["meta"]),
-        "audio": r["audio"] is not None, "created": r["created"],
+        "audio": r["audio"] is not None, "created": r["created"], "partner": r["partner"] is not None,
     }
     if r["verdict"]:
         out["verdict"] = json.loads(r["verdict"])
@@ -659,7 +708,7 @@ def put_student(sid: Id, body: StudentPut, me: Me):
         if not s:
             if c.execute("SELECT COUNT(*) FROM students WHERE account=? AND deleted=0", (me["id"],)).fetchone()[0] >= 50:
                 raise HTTPException(409, "too many students")
-            c.execute("INSERT INTO students VALUES (?,?,?,1,?,0)", (sid, me["id"], raw, now()))
+            c.execute("INSERT INTO students (id,account,data,rev,updated) VALUES (?,?,?,1,?)", (sid, me["id"], raw, now()))
             return {"rev": 1}
         if s["account"] != me["id"]:
             raise HTTPException(403, "other account")
@@ -671,15 +720,28 @@ def put_student(sid: Id, body: StudentPut, me: Me):
         return {"rev": s["rev"] + 1}
 
 
+@app.put("/api/students/{sid}/plan")
+def put_plan(sid: Id, body: Plan, me: Me):
+    if body.tz not in ZONES:
+        body.tz = DEFAULT_TZ
+    with db() as c:
+        s = my_student(c, me, sid)
+        for item in (body.sabki, body.manzil):
+            if item:
+                check_pages(s, item)
+        c.execute("UPDATE students SET plan=? WHERE id=?", (body.model_dump_json(by_alias=True, exclude_none=True), sid))
+    return {"ok": True}
+
+
 @app.delete("/api/students/{sid}")
 def delete_student(sid: Id, me: Me):
     with db() as c:
         my_student(c, me, sid)
         files = audio_names(c, "student=?", (sid,))
         c.execute("DELETE FROM submissions WHERE student=?", (sid,))
-        c.execute("DELETE FROM links WHERE student=?", (sid,))
+        unlink(c, sid)
         # Пустая метка остаётся, чтобы удаление дошло до других устройств.
-        c.execute("UPDATE students SET data=NULL, deleted=1, updated=? WHERE id=?", (now(), sid))
+        c.execute("UPDATE students SET data=NULL, plan=NULL, deleted=1, updated=? WHERE id=?", (now(), sid))
     remove_files(files)
     return {"ok": True}
 
@@ -693,7 +755,8 @@ class JoinIn(BaseModel):
 
 
 class ConsentIn(BaseModel):
-    consent: bool
+    consent: bool | None = None
+    partnerConsent: bool | None = None
 
 
 GROUP_BY_CODE = "SELECT g.*, a.name AS teacher_name, a.tg_id FROM groups g JOIN accounts a ON a.id=g.teacher WHERE g.code=?"
@@ -721,7 +784,11 @@ def join(sid: Id, body: JoinIn, me: Me):
         files = []
         if old and old["teacher"] == g["teacher"]:
             # Тот же учитель, другая группа: подтверждать второй раз незачем.
+            if old["grp"] != g["id"]:
+                drop_partner(c, sid)
             c.execute("UPDATE links SET grp=?, consent=? WHERE student=?", (g["id"], consent, sid))
+            if not body.consent:
+                c.execute("UPDATE links SET partner_consent=NULL WHERE student=?", (sid,))
             if not body.consent:
                 files = drop_waiting(c, "student=?", (sid,)) + drop_audio(c, "student=?", (sid,))
         else:
@@ -736,8 +803,15 @@ def join(sid: Id, body: JoinIn, me: Me):
     return {"ok": True}
 
 
+def drop_partner(c: sqlite3.Connection, sid: str):
+    """Ученик больше никому не напарник, и у него напарника нет. Непроверенное уходит учителю."""
+    c.execute("UPDATE submissions SET partner=NULL WHERE status='waiting' AND (partner=? OR student=?)", (sid, sid))
+    c.execute("UPDATE links SET partner=NULL, partner_consent=NULL WHERE partner=? OR student=?", (sid, sid))
+
+
 def unlink(c: sqlite3.Connection, sid: str) -> list[str]:
     """Связь кончилась: учитель больше не видит ученика, записи удаляются, оценки у ученика остаются."""
+    drop_partner(c, sid)
     files = drop_waiting(c, "student=?", (sid,)) + drop_audio(c, "student=?", (sid,))
     c.execute("DELETE FROM links WHERE student=?", (sid,))
     return files
@@ -745,10 +819,21 @@ def unlink(c: sqlite3.Connection, sid: str) -> list[str]:
 
 @app.patch("/api/students/{sid}/join")
 def change_consent(sid: Id, body: ConsentIn, me: Me):
+    files = []
     with db() as c:
         my_student(c, me, sid)
-        c.execute("UPDATE links SET consent=? WHERE student=?", (now() if body.consent else None, sid))
-        files = [] if body.consent else drop_waiting(c, "student=?", (sid,)) + drop_audio(c, "student=?", (sid,))
+        if body.consent is not None:
+            c.execute("UPDATE links SET consent=? WHERE student=?", (now() if body.consent else None, sid))
+        if body.consent is False:
+            c.execute("UPDATE links SET partner_consent=NULL WHERE student=?", (sid,))
+            files = drop_waiting(c, "student=?", (sid,)) + drop_audio(c, "student=?", (sid,))
+        if body.partnerConsent:
+            c.execute(
+                "UPDATE links SET partner_consent=? WHERE student=? AND partner IS NOT NULL AND consent IS NOT NULL", (now(), sid)
+            )
+        elif body.partnerConsent is False:
+            c.execute("UPDATE links SET partner_consent=NULL WHERE student=?", (sid,))
+            files += drop_waiting(c, "student=? AND partner IS NOT NULL", (sid,))
     remove_files(files)
     return {"ok": True}
 
@@ -765,10 +850,20 @@ def leave(sid: Id, me: Me):
 # ---------- сдача учителю ----------
 
 
-def check_pages(student: sqlite3.Row, m: Meta):
+def check_pages(student: sqlite3.Row, m: "Meta | PlanItem"):
     """Страницы сдачи есть в мусхафе ученика: иначе кабинет учителя не смог бы её открыть."""
     if any(r.page > PAGES[json.loads(student["data"])["mushaf"]] for r in m.ranges):
         raise HTTPException(422, "no such page")
+
+
+def owner_tg(c: sqlite3.Connection, sid: str) -> int | None:
+    r = c.execute("SELECT a.tg_id FROM students s JOIN accounts a ON a.id=s.account WHERE s.id=?", (sid,)).fetchone()
+    return r["tg_id"] if r else None
+
+
+def to_partner(link: sqlite3.Row, kind: str) -> str | None:
+    """Недавнее и давнее принимает напарник, если он есть; остальное учитель."""
+    return link["partner"] if kind in REVISION else None
 
 
 @app.post("/api/students/{sid}/submissions")
@@ -785,7 +880,7 @@ def send(sid: Id, me: Me, meta: Annotated[str, Form(max_length=20000)], audio: A
         link = c.execute("SELECT * FROM links WHERE student=? AND status='active'", (sid,)).fetchone()
         if not link:
             raise HTTPException(409, "no teacher")
-        if link["consent"] is None:
+        if link["consent"] is None or (to_partner(link, m.kind) and link["partner_consent"] is None):
             raise HTTPException(403, "no consent")
     used = sum(e.stat().st_size for e in os.scandir(AUDIO))
     if used > MAX_AUDIO_TOTAL:
@@ -815,23 +910,34 @@ def send(sid: Id, me: Me, meta: Annotated[str, Form(max_length=20000)], audio: A
             ).fetchone()
             if not link:
                 raise HTTPException(409, "no teacher")
+            partner = to_partner(link, m.kind)
+            # Напарника назначили, пока шла загрузка: разрешения на него ещё нет.
+            if partner and link["partner_consent"] is None:
+                raise HTTPException(409, "no consent")
             # Новая запись того же вида заменяет непроверенную.
             old = drop_waiting(c, "student=? AND kind=?", (sid, m.kind))
             subid = secrets.token_urlsafe(12)
             c.execute(
-                "INSERT INTO submissions VALUES (?,?,?,?,?,?,?,'waiting',NULL,?,NULL)",
-                (subid, sid, link["teacher"], m.kind, m.dump(), name, "audio/mp4", now()),
+                "INSERT INTO submissions (id,student,teacher,kind,meta,audio,mime,status,created,partner)"
+                " VALUES (?,?,?,?,?,?,?,'waiting',?,?)",
+                (subid, sid, link["teacher"], m.kind, m.dump(), name, "audio/mp4", now(), partner),
             )
-            n = c.execute(
-                "SELECT COUNT(*) FROM submissions WHERE teacher=? AND status='waiting'", (link["teacher"],)
-            ).fetchone()[0]
+            if partner:
+                tg = owner_tg(c, partner)
+                text = "Напарник прислал сдачу. Откройте приложение, чтобы проверить."
+            else:
+                tg = link["tg_id"]
+                n = c.execute(
+                    "SELECT COUNT(*) FROM submissions WHERE teacher=? AND status='waiting' AND partner IS NULL", (link["teacher"],)
+                ).fetchone()[0]
+                text = f"Новая сдача ждёт проверки. Всего ждёт: {n}."
     except BaseException:
         remove_files([name])
         raise
     finally:
         remove_files([name + ".raw"])
     remove_files(old)
-    notify(link["tg_id"], f"Новая сдача ждёт проверки. Всего ждёт: {n}.")
+    notify(tg, text)
     return {"id": subid}
 
 
@@ -851,13 +957,15 @@ def withdraw(subid: Id, me: Me):
 
 @app.get("/api/submissions/{subid}/audio")
 def get_audio(subid: Id, me: Me):
-    """Запись слышат сам ученик и его нынешний учитель."""
+    """Запись слышат сам ученик, его нынешний учитель и напарник, пока запись у него на проверке."""
     with db() as c:
         r = c.execute(
             "SELECT b.audio, b.mime FROM submissions b JOIN students s ON s.id=b.student"
             " LEFT JOIN links l ON l.student=b.student AND l.teacher=b.teacher AND l.status='active'"
-            " WHERE b.id=? AND b.audio IS NOT NULL AND (s.account=? OR (b.teacher=? AND l.student IS NOT NULL))",
-            (subid, me["id"], me["id"]),
+            " LEFT JOIN students p ON p.id=b.partner AND p.deleted=0 AND b.status='waiting'"
+            " WHERE b.id=? AND b.audio IS NOT NULL AND (s.account=? OR (l.student IS NOT NULL AND (b.teacher=?"
+            " OR (p.account=? AND l.partner=b.partner AND l.partner_consent IS NOT NULL))))",
+            (subid, me["id"], me["id"], me["id"]),
         ).fetchone()
     if not r:
         raise HTTPException(404, "no audio")
@@ -934,7 +1042,7 @@ def delete_group(gid: Id, me: Me):
 def teacher(me: Me):
     with db() as c:
         rows = c.execute(
-            "SELECT l.status, l.consent, l.grp, l.created AS asked, s.id, s.data, s.updated FROM links l JOIN students s ON s.id=l.student"
+            "SELECT l.status, l.consent, l.grp, l.partner, l.created AS asked, s.id, s.data, s.updated FROM links l JOIN students s ON s.id=l.student"
             " WHERE l.teacher=? AND s.deleted=0 ORDER BY l.created", (me["id"],),
         ).fetchall()
         subs = c.execute(
@@ -959,7 +1067,8 @@ def teacher(me: Me):
         # До подтверждения учитель видит только имя.
         "requests": [{"id": r["id"], "name": json.loads(r["data"])["name"], "group": r["grp"], "created": r["asked"]} for r in rows if r["status"] == "pending"],
         "students": [
-            {"data": json.loads(r["data"]), "group": r["grp"], "updated": r["updated"], "consent": r["consent"] is not None}
+            {"data": json.loads(r["data"]), "group": r["grp"], "updated": r["updated"], "consent": r["consent"] is not None,
+             "partner": r["partner"]}
             for r in rows if r["status"] == "active"
         ],
         "inbox": [sub_json(r) for r in subs],
@@ -984,16 +1093,33 @@ def answer_request(sid: Id, body: AcceptIn, me: Me):
     return {"ok": True}
 
 
-class MoveIn(BaseModel):
-    group: Id
+class PupilPatch(BaseModel):
+    group: Id | None = None
+    partner: Id | None = None
 
 
 @app.patch("/api/teacher/students/{sid}")
-def move(sid: Id, body: MoveIn, me: Me):
+def change_pupil(sid: Id, body: PupilPatch, me: Me):
+    """Перевести в другую группу; назначить напарника или снять его (partner: null)."""
     with db() as c:
-        my_pupil(c, me, sid)
-        my_group(c, me, body.group)
-        c.execute("UPDATE links SET grp=? WHERE student=?", (body.group, sid))
+        pupil = my_pupil(c, me, sid)
+        link = c.execute("SELECT * FROM links WHERE student=?", (sid,)).fetchone()
+        if body.group and body.group != link["grp"]:
+            my_group(c, me, body.group)
+            drop_partner(c, sid)
+            c.execute("UPDATE links SET grp=? WHERE student=?", (body.group, sid))
+        if "partner" in body.model_fields_set and body.partner != link["partner"]:
+            if body.partner:
+                mate = my_pupil(c, me, body.partner)
+                grp = c.execute("SELECT grp FROM links WHERE student=?", (body.partner,)).fetchone()["grp"]
+                # Себе и детям своего же аккаунта не сдают.
+                if mate["account"] == pupil["account"] or grp != c.execute("SELECT grp FROM links WHERE student=?", (sid,)).fetchone()["grp"]:
+                    raise HTTPException(409, "bad partner")
+                notify(pupil["tg_id"], "Учитель назначил напарника. Откройте приложение.")
+                notify(mate["tg_id"], "Учитель назначил вас напарником: принимайте недавнее и давнее. Откройте приложение.")
+            # Разрешение на запись давали прежнему напарнику, новому его спрашивают заново.
+            c.execute("UPDATE submissions SET partner=NULL WHERE student=? AND status='waiting'", (sid,))
+            c.execute("UPDATE links SET partner=?, partner_consent=NULL WHERE student=?", (body.partner, sid))
     return {"ok": True}
 
 
@@ -1033,11 +1159,166 @@ def check_in_person(sid: Id, body: InPerson, me: Me):
         files = drop_waiting(c, "student=? AND kind=?", (sid, body.meta.kind))
         subid = secrets.token_urlsafe(12)
         c.execute(
-            "INSERT INTO submissions VALUES (?,?,?,?,?,NULL,NULL,'checked',?,?,?)",
+            "INSERT INTO submissions (id,student,teacher,kind,meta,status,verdict,created,checked) VALUES (?,?,?,?,?,'checked',?,?,?)",
             (subid, sid, me["id"], body.meta.kind, body.meta.dump(), body.verdict.dump(), now(), now()),
         )
     remove_files(files)
     return {"id": subid}
+
+
+# ---------- напарник ----------
+
+
+def last_passed(c: sqlite3.Connection, sid: str) -> dict:
+    """Когда последний раз приняли недавнее и давнее, по записям сервера."""
+    out: dict = {}
+    for r in c.execute(
+        "SELECT kind, meta, verdict FROM submissions WHERE student=? AND status='checked' AND kind IN ('sabki','manzil') AND checked>?",
+        (sid, now() - 3 * 86400),
+    ):
+        if json.loads(r["verdict"])["passed"]:
+            out[r["kind"]] = max(out.get(r["kind"], ""), json.loads(r["meta"])["date"])
+    return out
+
+
+def partner_pupils(c: sqlite3.Connection, me: sqlite3.Row) -> list[dict]:
+    """У кого я (мой ученик) принимаю недавнее и давнее. Только имя и что сдаётся, без дневника."""
+    out = []
+    for r in c.execute(
+        "SELECT l.student, l.partner, s.data, s.plan FROM links l JOIN students s ON s.id=l.student JOIN students p ON p.id=l.partner"
+        " WHERE p.account=? AND p.deleted=0 AND s.deleted=0 AND l.status='active' ORDER BY l.created", (me["id"],),
+    ).fetchall():
+        d, plan = json.loads(r["data"]), json.loads(r["plan"]) if r["plan"] else {}
+        done = {**plan.get("done", {})}
+        for k, v in last_passed(c, r["student"]).items():
+            done[k] = max(done.get(k, ""), v)
+        subs = c.execute(
+            "SELECT * FROM submissions WHERE student=? AND partner=? AND status='waiting' ORDER BY created", (r["student"], r["partner"])
+        ).fetchall()
+        out.append({
+            "student": r["student"], "mine": r["partner"], "name": d["name"], "mushaf": d["mushaf"], "maxErrors": d["method"]["maxErrors"],
+            "sabki": plan.get("sabki"), "manzil": plan.get("manzil"), "done": done, "inbox": [sub_json(x) for x in subs],
+        })
+    return out
+
+
+def my_mate(c: sqlite3.Connection, me: sqlite3.Row, sid: str) -> sqlite3.Row:
+    r = c.execute(
+        "SELECT s.*, l.teacher, l.partner, a.tg_id FROM links l JOIN students s ON s.id=l.student JOIN accounts a ON a.id=s.account"
+        " JOIN students p ON p.id=l.partner WHERE l.student=? AND l.status='active' AND p.account=? AND p.deleted=0 AND s.deleted=0",
+        (sid, me["id"]),
+    ).fetchone()
+    if not r:
+        raise HTTPException(404, "no student")
+    return r
+
+
+@app.post("/api/partner/submissions/{subid}")
+def partner_check(subid: Id, body: Verdict, me: Me):
+    with db() as c:
+        r = c.execute("SELECT * FROM submissions WHERE id=? AND status='waiting' AND partner IS NOT NULL", (subid,)).fetchone()
+        mate = my_mate(c, me, r["student"]) if r else None
+        if not r or mate["partner"] != r["partner"]:
+            raise HTTPException(404, "no submission")
+        c.execute("UPDATE submissions SET status='checked', verdict=?, checked=? WHERE id=?", (body.dump("partner"), now(), subid))
+        notify(mate["tg_id"], "Напарник проверил сдачу. Откройте приложение, чтобы увидеть оценку.")
+    return {"ok": True}
+
+
+@app.post("/api/partner/students/{sid}/check")
+def partner_in_person(sid: Id, body: InPerson, me: Me):
+    if body.meta.kind not in REVISION:
+        raise HTTPException(403, "teacher only")
+    with db() as c:
+        mate = my_mate(c, me, sid)
+        check_pages(mate, body.meta)
+        files = drop_waiting(c, "student=? AND kind=?", (sid, body.meta.kind))
+        subid = secrets.token_urlsafe(12)
+        c.execute(
+            "INSERT INTO submissions (id,student,teacher,kind,meta,status,verdict,created,checked,partner)"
+            " VALUES (?,?,?,?,?,'checked',?,?,?,?)",
+            (subid, sid, mate["teacher"], body.meta.kind, body.meta.dump(), body.verdict.dump("partner"), now(), now(), mate["partner"]),
+        )
+    remove_files(files)
+    return {"id": subid}
+
+
+# ---------- напоминания ----------
+
+ZONES = zoneinfo.available_timezones()
+DEFAULT_TZ = "Asia/Almaty"
+
+
+def remind(t: int):
+    """Утреннее напоминание: что повторить сегодня. Сдавшему или уже пославшему запись не пишем."""
+    with db() as c:
+        rows = c.execute(
+            "SELECT s.id, s.plan, s.data, s.reminded, s.account, a.tg_id FROM students s JOIN accounts a ON a.id=s.account"
+            " WHERE s.plan IS NOT NULL AND s.deleted=0 AND a.muted=0 AND a.tg_id IS NOT NULL"
+        ).fetchall()
+        many = {r["account"] for r in c.execute("SELECT account FROM students WHERE deleted=0 GROUP BY account HAVING COUNT(*)>1")}
+        for r in rows:
+            plan = json.loads(r["plan"])
+            if not plan["at"]:
+                continue
+            local = datetime.fromtimestamp(t, zoneinfo.ZoneInfo(plan["tz"]))
+            date = local.strftime("%Y-%m-%d")
+            h, m = plan["at"].split(":")
+            late = local.hour * 60 + local.minute - int(h) * 60 - int(m)
+            # Окно 10 минут: служба могла перезапускаться в нужную минуту.
+            if not 0 <= late < 10 or r["reminded"] == date:
+                continue
+            c.execute("UPDATE students SET reminded=? WHERE id=?", (date, r["id"]))
+            done = last_passed(c, r["id"])
+            sent = {
+                x["kind"] for x in c.execute("SELECT kind, meta FROM submissions WHERE student=? AND status='waiting'", (r["id"],))
+                if json.loads(x["meta"])["date"] == date
+            }
+            lines = [
+                plan[k]["text"] for k in REVISION
+                if plan.get(k) and k not in sent and date not in (plan["done"].get(k), done.get(k))
+            ]
+            if lines:
+                # Имя нужно, только когда с одного аккаунта учатся несколько детей.
+                name = [json.loads(r["data"])["name"]] if r["account"] in many else []
+                notify(r["tg_id"], "\n".join([*name, plan["head"], *lines]))
+
+
+def remind_forever():
+    while True:
+        try:
+            remind(now())
+        except Exception as e:  # noqa: BLE001
+            print(f"remind: {type(e).__name__}: {e}", flush=True)
+        time.sleep(30)
+
+
+if os.environ.get("REMIND", "1") == "1":
+    threading.Thread(target=remind_forever, daemon=True).start()
+
+
+class MuteIn(BaseModel):
+    tg_id: int
+    muted: bool
+
+
+@app.post("/internal/mute", dependencies=[Depends(from_bot)])
+def bot_mute(body: MuteIn):
+    """/stop и /start в боте."""
+    with db() as c:
+        c.execute("UPDATE accounts SET muted=? WHERE tg_id=?", (int(body.muted), body.tg_id))
+    return {"ok": True}
+
+
+@app.post("/internal/personal", dependencies=[Depends(from_bot)])
+def bot_personal():
+    """Кому утренний план шлёт сервер: общее напоминание бота о недавнем и давнем им не нужно."""
+    with db() as c:
+        rows = c.execute(
+            "SELECT a.tg_id, s.plan FROM students s JOIN accounts a ON a.id=s.account"
+            " WHERE s.plan IS NOT NULL AND s.deleted=0 AND a.tg_id IS NOT NULL"
+        ).fetchall()
+    return {"ids": sorted({r["tg_id"] for r in rows if any(json.loads(r["plan"]).get(k) for k in REVISION)})}
 
 
 @app.get("/api/health")

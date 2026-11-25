@@ -25,7 +25,7 @@ export function useJob() {
       await fn();
       return true;
     } catch (e) {
-      setFailed(e instanceof ApiError && e.status === 404 ? "gone" : "net");
+      setFailed(e instanceof ApiError && (e.status === 404 || e.status === 409) ? "gone" : "net");
       return false;
     } finally {
       setBusy(false);

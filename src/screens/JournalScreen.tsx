@@ -22,7 +22,7 @@ function SubLine({ sub, onOpen }: { sub: Submission; onOpen?: (s: Submission) =>
         {sub.peeks ? <span className="muted"> ({t("check_peeks")}: {sub.peeks})</span> : null}
         {open && (
           <button className="link inline" onClick={open}>
-            {t("result_open")}
+            {t(sub.by === "partner" ? "result_openPartner" : "result_open")}
           </button>
         )}
       </span>
@@ -92,7 +92,7 @@ export function JournalScreen({ student, onOpen }: { student: Student; onOpen?: 
                           </span>
                           {onOpen && (s.marks || s.comment) && (
                             <button className="link inline" onClick={() => onOpen(s)}>
-                              {t("result_open")}
+                              {t(s.by === "partner" ? "result_openPartner" : "result_open")}
                             </button>
                           )}
                           <span className={`pill ${s.passed ? "ok" : "bad"}`}>{s.grade}</span>

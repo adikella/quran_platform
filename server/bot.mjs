@@ -27,7 +27,8 @@ if (!TOKEN) {
 // Распорядок по методике (см. РАСПОРЯДОК.md). Время по Алматы.
 const SCHEDULE = [
   { at: "05:00", text: "Время сдать урок устазу. Если урок ещё не сдан, сдайте после фаджра." },
-  { at: "08:00", text: "Время недавнего и давнего: повторите и сдайте до 10:00." },
+  // Кому личный план («Сегодня: джуз 1») шлёт quran-api, этого общего напоминания не получает.
+  { at: "08:00", text: "Время недавнего и давнего: повторите и сдайте до 10:00.", revision: true },
   { at: "12:30", text: "Учите новый урок: шаги по порядку, всего 200 повторений." },
   { at: "18:30", text: "Подготовьте новый урок на завтра." },
   { at: "20:00", text: "Повторите давнее перед сном." },
@@ -72,6 +73,10 @@ async function internal(path, body) {
   if (!res.ok) throw new Error(`internal ${path}: ${res.status}`);
   return res.json();
 }
+
+/** Личные утренние напоминания шлёт quran-api: /stop и /start включают и выключают и их. */
+const mute = (chat, muted) =>
+  internal("/mute", { tg_id: Number(chat), muted }).catch((e) => console.error(`напоминания: ${e.message}`));
 
 const EXPIRED = "Эта ссылка для входа устарела. Нажмите «Войти через Telegram» на сайте ещё раз.";
 
@@ -150,9 +155,17 @@ async function tick() {
   const due = SCHEDULE.filter((s) => s.at <= time && minutes(time) - minutes(s.at) < 10);
   if (!due.length) return;
   let changed = false;
+  let personal = new Set();
+  if (due.some((s) => s.revision)) {
+    try {
+      personal = new Set((await internal("/personal", {})).ids.map(String));
+    } catch (e) {
+      console.error(`личные планы: ${e.message}`);
+    }
+  }
   for (const [chat, sub] of Object.entries(subs)) {
     for (const s of due) {
-      if (sub.last?.[s.at] === date) continue;
+      if (sub.last?.[s.at] === date || (s.revision && personal.has(chat))) continue;
       try {
         await send(chat, s.text);
       } catch (e) {
@@ -185,6 +198,7 @@ async function onMessage(msg) {
     for (const s of SCHEDULE) if (s.at > time) delete last[s.at];
     subs[chat] = { name: msg.from?.first_name || "", since: date, last };
     await save();
+    await mute(chat, false);
     // Ссылка учителя: t.me/бот?start=join_КОД. Приложение откроется сразу на записи к нему.
     const join = text.match(/^\/start join_([A-Z0-9]{6,16})$/)?.[1];
     if (join) await send(chat, "Ассаляму алейкум! Учитель зовёт вас в группу. Откройте приложение кнопкой ниже.", `${APP_URL}/?join=${join}`);
@@ -192,6 +206,7 @@ async function onMessage(msg) {
   } else if (text.startsWith("/stop")) {
     delete subs[chat];
     await save();
+    await mute(chat, true);
     await call("sendMessage", { chat_id: chat, text: "Напоминания отключены. Включить снова: /start." });
   } else {
     await send(chat, "Откройте приложение кнопкой ниже.");
