@@ -1,6 +1,7 @@
 // Методика заучивания: чистые функции без интерфейса, чтобы их можно было проверить тестами.
 
-import type { LineRange, Method, Step, Student, Volume } from "./types";
+import { covers, gaps, juzOf, juzPages, learnedOf, linesOn, placeOf, type Span } from "./learned";
+import type { LineRange, Method, MushafMeta, Step, Student, Volume } from "./types";
 
 export const DEFAULT_METHOD: Method = {
   readFirst: 20,
@@ -14,6 +15,7 @@ export const DEFAULT_METHOD: Method = {
   maxErrors: 2,
   sabkiPages: 10,
   manzilJuz: 2,
+  remindAt: "08:00",
   naziraJuz: 3,
   sessionMinutes: 15,
   morningStart: "08:00",
@@ -46,17 +48,19 @@ export function chunkLines(from: number, to: number): [number, number][] {
 export const BRIDGE_WORDS = 1;
 
 /**
- * Какие строки страницы взять в следующий урок, начиная со строки `from`.
+ * Какие строки страницы взять в следующий урок, начиная со строки `from` и не дальше строки `end`
+ * (за ней уже выученное или другая сура).
  * Урок не продлевается до конца аята: продолжение цепляется словом-мостиком (BRIDGE_WORDS).
  */
-export function nextLessonRange(page: number, from: number, lineCount: number, volume: Volume): LineRange {
-  const left = lineCount - from;
+export function nextLessonRange(page: number, from: number, lineCount: number, volume: Volume, end = lineCount): LineRange {
+  const left = end - from;
   let size: number;
   if (volume === "page") size = left;
   else if (volume === "half") {
     const half = Math.ceil(lineCount / 2);
-    // Первая половина — до середины страницы, вторая — до конца.
-    size = from < half ? half - from : left;
+    // Первая половина: до середины страницы, вторая: до конца. Обрывок у самой середины отдельным уроком не бывает.
+    if (half - from >= 4) size = half - from;
+    else size = left <= half ? left : half;
   } else size = 2;
   // Не оставлять в конце страницы одну строку: она уходит в этот урок.
   if (left - size === 1) size += 1;
@@ -67,6 +71,8 @@ export function nextLessonRange(page: number, from: number, lineCount: number, v
 export interface StepOptions {
   /** Учить урок одним куском, без нарезки по 2 строки (объём «полстраницы» и «страница»). */
   oneChunk?: boolean;
+  /** Что на этой странице уже выучено. По умолчанию всё до начала урока. */
+  known?: Span[];
 }
 
 /** Шаги урока по методике. `lineCount` — число строк на странице урока. */
@@ -101,11 +107,14 @@ export function buildSteps(range: LineRange, lineCount: number, m: Method, prev?
     steps.push({ kind: "whole", range, hidden: true, reps: m.whole, chunk: chunks.length });
   }
   // Соединение с прошлым уроком на этой же странице: выучил 1–2, теперь 3–4, в конце читает 1–4.
-  // Последний урок страницы соединяется со всей страницей.
-  const pageDone = range.to >= lineCount && range.from > 0;
-  if (m.join > 0 && (pageDone || (prev && prev.page === page && prev.to === range.from && prev.from < range.from))) {
-    const from = pageDone ? 0 : prev!.from;
-    steps.push({ kind: "join", range: { page, from, to: range.to }, hidden: false, reps: m.join, chunk: chunks.length + 1 });
+  // Урок, после которого выучена вся страница, соединяется со всей страницей.
+  const known = opts.known ?? [[0, range.from] as Span];
+  const part = range.from > 0 || range.to < lineCount;
+  const pageDone = part && covers([...known, [range.from, range.to]], 0, lineCount);
+  const after = prev && prev.page === page && prev.to === range.from && prev.from < range.from && covers(known, prev.from, prev.to);
+  if (m.join > 0 && (pageDone || after)) {
+    const joined = pageDone ? { page, from: 0, to: lineCount } : { page, from: prev!.from, to: range.to };
+    steps.push({ kind: "join", range: joined, hidden: false, reps: m.join, chunk: chunks.length + 1 });
   }
   // Повторять урок наизусть, пока за урок не наберётся дневная норма (по умолчанию 200).
   const total = steps.reduce((n, st) => n + st.reps, 0);
@@ -118,14 +127,15 @@ export function buildSteps(range: LineRange, lineCount: number, m: Method, prev?
 }
 
 /** Прошлый сданный урок, который кончается там, где начинается этот (для соединения). */
-export function previousLesson(s: Student, range: LineRange): LineRange | undefined {
+export function previousLesson(s: Student, range: LineRange, known: Span[] = [[0, range.from]]): LineRange | undefined {
   for (let i = s.submissions.length - 1; i >= 0; i--) {
     const sub = s.submissions[i];
     if (sub.kind !== "sabak" || !sub.passed) continue;
     const r = sub.ranges[0];
     if (r && r.page === range.page && r.to === range.from) return r;
   }
-  if (range.from > 0) return { page: range.page, from: Math.max(0, range.from - 2), to: range.from };
+  const from = Math.max(0, range.from - 2);
+  if (range.from > 0 && gaps(known, from, range.from).length === 0) return { page: range.page, from, to: range.from };
   return undefined;
 }
 
@@ -136,67 +146,112 @@ export function gradeFor(errors: number, maxErrors: number): { grade: number; pa
   return { grade: Math.max(3, 5 - errors), passed };
 }
 
-/** Следующая страница в выбранном направлении или null, если мусхаф закончился. */
-export function stepPage(page: number, direction: 1 | -1, pages: number): number | null {
-  const p = page + direction;
-  return p >= 1 && p <= pages ? p : null;
+/** Группа манзиля: джуз или его половина. */
+export interface ManzilUnit {
+  juz: number;
+  /** Половина джуза, если круг идёт половинами. */
+  half?: 1 | 2;
+  ranges: LineRange[];
 }
 
 export interface Revision {
-  /** Сабки: учится сейчас — сданные строки текущей страницы и выученные страницы текущего джуза. */
+  /** Сабки: учится сейчас. Сданные строки текущей страницы и выученные страницы текущего джуза. */
   sabki: LineRange[];
   /** Выученные страницы текущего джуза, которые ждут, пока наберётся полная пачка. */
   sabkiWaiting: number[];
-  /** Все группы манзиля (по джузам), в порядке заучивания. */
-  manzilGroups: { juz: number; pages: number[] }[];
-  /** Группы манзиля на сегодня. */
-  manzilToday: { juz: number; pages: number[] }[];
+  /** Весь круг манзиля, начиная с того, что на очереди. */
+  manzilQueue: ManzilUnit[];
+  /** Что сдавать сейчас. */
+  manzilToday: ManzilUnit[];
 }
+
+export const manzilDir = (s: Pick<Student, "method" | "direction">): 1 | -1 => s.method.manzilDir ?? s.direction;
+
+/** Порядок страниц в круге: вниз по мусхафу или джузами вверх, внутри джуза всегда сверху вниз. */
+export const manzilKey = (meta: MushafMeta, dir: 1 | -1, p: number) => (dir === 1 ? p : (31 - juzOf(meta, p)) * 1000 + p);
+
+/** Группы манзиля по порядку круга: выученное всех джузов, кроме текущего. */
+function manzilUnits(s: Learner, meta: MushafMeta, curJuz: number): ManzilUnit[] {
+  const halves = s.method.manzilJuz < 1;
+  const dir = manzilDir(s);
+  const pages = [...learnedOf(s.hifz, meta)].filter(([p]) => juzOf(meta, p) !== curJuz);
+  pages.sort(([a], [b]) => manzilKey(meta, dir, a) - manzilKey(meta, dir, b));
+  const out: ManzilUnit[] = [];
+  for (const [p, spans] of pages) {
+    const juz = juzOf(meta, p);
+    let half: 1 | 2 | undefined;
+    if (halves) {
+      const all = juzPages(meta, juz);
+      half = all.indexOf(p) < Math.ceil(all.length / 2) ? 1 : 2;
+    }
+    let unit = out[out.length - 1];
+    if (unit?.juz !== juz || unit.half !== half) out.push((unit = { juz, ...(half ? { half } : {}), ranges: [] }));
+    unit.ranges.push(...spans.map(([from, to]) => ({ page: p, from, to })));
+  }
+  return out;
+}
+
+type Learner = Pick<Student, "hifz" | "method" | "direction" | "volume">;
 
 /**
  * Делит выученное на сабки и манзиль.
- * Сабки — то, что учится сейчас: страницы текущего джуза, которые сдают пачками по `sabkiPages` (10).
+ * Сабки: то, что учится сейчас, страницы текущего джуза, которые сдают пачками по `sabkiPages` (10).
  * Выучено 14 страниц: сдаются первые 10, остальные 4 ждут, пока наберётся ещё 10.
- * Пока в джузе меньше одной полной пачки (новичок), сдают всё, что есть, включая сданные строки текущей страницы.
- * Манзиль — выученные страницы остальных джузов; его сдают по `manzilJuz` джуза за утро, по кругу.
+ * Пока в джузе меньше одной полной пачки (новичок), сдают всё, что есть, включая страницы, выученные не целиком.
+ * Манзиль: выученное остальных джузов; его сдают по `manzilJuz` джуза за утро, по кругу.
+ * Когда выучен весь мусхаф, сабки нет и всё идёт в манзиль.
  */
-export function revision(
-  student: Pick<Student, "hifz" | "method">,
-  juzOf: (page: number) => number,
-  lineCount: (page: number) => number,
-): Revision {
-  const { memorized, cur, manzilCursor } = student.hifz;
-  const m = student.method;
+export function revision(s: Learner, meta: MushafMeta): Revision {
+  const m = s.method;
+  const place = placeOf(s, meta);
+  const curJuz = place ? juzOf(meta, place.page) : 0;
+  const learned = learnedOf(s.hifz, meta);
+  const full = (p: number): LineRange => ({ page: p, from: 0, to: linesOn(meta, p) });
+
   const sabki: LineRange[] = [];
-  const curJuz = juzOf(cur.page);
-  const inCurrent = memorized.filter((p) => juzOf(p) === curJuz);
+  const inCurrent = s.hifz.memorized.filter((p) => juzOf(meta, p) === curJuz);
   const block = Math.max(1, m.sabkiPages);
   const fullBlocks = Math.floor(inCurrent.length / block);
   const recent = fullBlocks > 0 ? inCurrent.slice((fullBlocks - 1) * block, fullBlocks * block) : inCurrent;
-  if (fullBlocks === 0 && cur.line > 0) sabki.push({ page: cur.page, from: 0, to: cur.line });
   const sabkiWaiting = fullBlocks > 0 ? inCurrent.slice(fullBlocks * block) : [];
-  for (let i = recent.length - 1; i >= 0; i--) {
-    const p = recent[i];
-    sabki.push({ page: p, from: 0, to: lineCount(p) });
+  if (fullBlocks === 0 && place) {
+    const near = (p: number) => Math.abs(p - place.page);
+    const parts = [...learned].filter(([p]) => juzOf(meta, p) === curJuz && !inCurrent.includes(p)).sort(([a], [b]) => near(a) - near(b));
+    for (const [page, spans] of parts) sabki.push(...spans.map(([from, to]) => ({ page, from, to })));
   }
+  for (let i = recent.length - 1; i >= 0; i--) sabki.push(full(recent[i]));
 
-  const old = memorized.filter((p) => juzOf(p) !== curJuz);
-  const manzilGroups: { juz: number; pages: number[] }[] = [];
-  for (const p of old) {
-    const j = juzOf(p);
-    const last = manzilGroups[manzilGroups.length - 1];
-    if (last && last.juz === j) last.pages.push(p);
-    else manzilGroups.push({ juz: j, pages: [p] });
-  }
-
-  const manzilToday: { juz: number; pages: number[] }[] = [];
-  if (manzilGroups.length) {
-    const count = Math.min(m.manzilJuz, manzilGroups.length);
-    for (let i = 0; i < count; i++) {
-      manzilToday.push(manzilGroups[(manzilCursor + i) % manzilGroups.length]);
+  const units = manzilUnits(s, meta, curJuz);
+  let next = 0;
+  if (units.length) {
+    const at = s.hifz.manzilAt;
+    if (at === undefined) next = s.hifz.manzilCursor % units.length;
+    else {
+      const key = (p: number) => manzilKey(meta, manzilDir(s), p);
+      next = units.findIndex((u) => key(u.ranges[u.ranges.length - 1].page) > key(at));
+      if (next < 0) next = 0;
     }
   }
-  return { sabki, sabkiWaiting, manzilGroups, manzilToday };
+  const manzilQueue = [...units.slice(next), ...units.slice(0, next)];
+  return { sabki, sabkiWaiting, manzilQueue, manzilToday: manzilQueue.slice(0, manzilPerDay(m)) };
+}
+
+/** Сколько групп манзиля за утро. */
+export const manzilPerDay = (m: Pick<Method, "manzilJuz">) => (m.manzilJuz > 0 ? Math.max(1, Math.floor(m.manzilJuz)) : 0);
+
+/** Круг по дням, начиная с того, что на очереди. */
+export function manzilDays(rev: Revision, m: Pick<Method, "manzilJuz">): ManzilUnit[][] {
+  const n = manzilPerDay(m);
+  const out: ManzilUnit[][] = [];
+  if (n) for (let i = 0; i < rev.manzilQueue.length; i += n) out.push(rev.manzilQueue.slice(i, i + n));
+  return out;
+}
+
+/** После какой страницы должен идти круг, чтобы следующей стала эта группа. */
+export function manzilBefore(queue: ManzilUnit[], unit: ManzilUnit): number {
+  const i = queue.findIndex((u) => u.juz === unit.juz && u.half === unit.half);
+  const prev = queue[(i - 1 + queue.length) % queue.length];
+  return prev.ranges[prev.ranges.length - 1].page;
 }
 
 /** Сколько страниц нужно прочитать на этапе назиры (примерно 20 страниц в джузе). */

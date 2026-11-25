@@ -2,13 +2,15 @@
 
 import { useSyncExternalStore } from "react";
 import { settle } from "./merge";
-import { DEFAULT_METHOD, gradeFor, nextLessonRange, todayKey } from "./method";
+import { atPage, firstFree, learnedOf, nextLesson, withLearned, type Learned } from "./learned";
+import { DEFAULT_METHOD, gradeFor, todayKey } from "./method";
 import type {
   AppState,
   DayStats,
   Lang,
   LineRange,
   MushafId,
+  MushafMeta,
   Stage,
   Student,
   Submission,
@@ -167,9 +169,11 @@ export interface NewStudent {
   volume: Volume;
   direction: 1 | -1;
   startPage: number;
+  /** Что выучено раньше, до приложения. */
+  learned?: Learned;
 }
 
-export function addStudent(n: NewStudent) {
+export function addStudent(n: NewStudent, meta: MushafMeta) {
   const st: Student = {
     id: uid(),
     name: n.name.trim() || "—",
@@ -178,20 +182,28 @@ export function addStudent(n: NewStudent) {
     volume: n.volume,
     direction: n.direction,
     method: { ...DEFAULT_METHOD },
-    nazira: { next: n.stage === "nazira" ? n.startPage : 1, read: [] },
-    hifz: {
-      memorized: [],
-      cur: { page: n.startPage, line: 0 },
-      pending: null,
-      lesson: null,
-      manzilCursor: 0,
-    },
+    nazira: { next: 1, read: [] },
+    hifz: { memorized: [], parts: {}, cur: { page: n.startPage, line: 0 }, pending: null, lesson: null, manzilCursor: 0 },
     submissions: [],
     days: {},
     updatedAt: Date.now(),
   };
-  set({ ...state, students: [...state.students, st], activeId: st.id });
+  const ready = n.learned ? atPage(withLearned(st, n.learned, meta), n.startPage, meta) : st;
+  set({ ...state, students: [...state.students, ready], activeId: st.id });
   return st.id;
+}
+
+/** Отметить выученное раньше и место, откуда учить дальше (если урока в работе нет). */
+export function setLearned(id: string, learned: Learned, page: number | null, meta: MushafMeta) {
+  updateStudent(id, (s) => {
+    const next = withLearned(s, learned, meta);
+    return page === null || s.hifz.lesson || s.hifz.pending ? next : atPage(next, page, meta);
+  });
+}
+
+/** Поставить круг давнего так, чтобы следующей шла группа после этой страницы. */
+export function setManzilAt(id: string, page: number) {
+  updateStudent(id, (s) => ({ ...s, hifz: { ...s.hifz, manzilAt: page } }));
 }
 
 export function removeStudent(id: string) {
@@ -199,7 +211,7 @@ export function removeStudent(id: string) {
   set({ ...state, students, activeId: state.activeId === id ? (students[0]?.id ?? null) : state.activeId });
 }
 
-export function patchStudent(id: string, patch: Partial<Pick<Student, "name" | "volume" | "direction" | "method" | "stage">>) {
+export function patchStudent(id: string, patch: Partial<Pick<Student, "name" | "volume" | "method" | "stage">>) {
   updateStudent(id, (s) => ({ ...s, ...patch }));
 }
 
@@ -213,14 +225,23 @@ export function setBookmark(id: string, page: number | null) {
   });
 }
 
-/** Перейти от назиры к заучиванию. Заучивание начинается со страницы `startPage`. */
-export function startHifz(id: string, startPage: number, direction: 1 | -1) {
-  updateStudent(id, (s) => ({
-    ...s,
-    stage: "hifz",
-    direction,
-    hifz: { ...s.hifz, cur: { page: startPage, line: 0 }, lesson: null, pending: null },
-  }));
+/** Перейти от назиры к заучиванию. */
+export function startHifz(id: string, startPage: number, direction: 1 | -1, meta: MushafMeta, learned?: Learned) {
+  updateStudent(id, (s) => {
+    const next: Student = { ...s, stage: "hifz", direction, hifz: { ...s.hifz, lesson: null, pending: null } };
+    return atPage(learned ? withLearned(next, learned, meta) : next, startPage, meta);
+  });
+}
+
+/** Сменить направление. Место не меняется, если впереди есть что учить. */
+export function setDirection(id: string, direction: 1 | -1, meta: MushafMeta) {
+  updateStudent(id, (s) => {
+    // Пока строки текущей страницы не записаны отдельно, их место знает только прежнее направление.
+    const next = { ...withLearned(s, learnedOf(s.hifz, meta), meta), direction };
+    if (s.hifz.lesson || s.hifz.pending || nextLesson(next, meta)) return next;
+    const page = firstFree(learnedOf(next.hifz, meta), meta, direction);
+    return page === null ? next : atPage(next, page, meta);
+  });
 }
 
 /** +1 повторение урока: идёт в счётчик урока и в общий итог дня. */
@@ -253,10 +274,10 @@ export function addTime(id: string, cat: TimeCategory, seconds: number) {
 
 // ---------- урок (сабак) ----------
 
-export function beginLesson(id: string, lineCount: number) {
+export function beginLesson(id: string, meta: MushafMeta) {
   updateStudent(id, (s) => {
-    if (s.hifz.lesson || s.hifz.pending) return s;
-    const range = nextLessonRange(s.hifz.cur.page, s.hifz.cur.line, lineCount, s.volume);
+    const range = nextLesson(s, meta);
+    if (!range || s.hifz.lesson || s.hifz.pending) return s;
     return { ...s, hifz: { ...s.hifz, lesson: { range, step: 0, done: 0 } } };
   });
 }
@@ -294,13 +315,13 @@ export interface CheckResult {
   groups?: number;
 }
 
-export function submit(id: string, r: CheckResult, pages: number, lineCount: (p: number) => number): Submission {
+export function submit(id: string, r: CheckResult, meta: MushafMeta): Submission {
   let saved!: Submission;
   updateStudent(id, (s) => {
     const { grade, passed } = gradeFor(r.errors + r.notes, s.method.maxErrors);
     const { groups, ...rest } = r;
     saved = { id: uid(), date: todayKey(), grade, passed, ...rest };
-    return settle(s, saved, groups, pages, lineCount);
+    return settle(s, saved, groups, meta);
   });
   return saved;
 }

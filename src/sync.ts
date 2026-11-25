@@ -425,7 +425,7 @@ async function withVerdict(st: Student, v: RemoteSub): Promise<(s: Student) => S
     ...(Object.keys(marks).length ? { marks } : {}),
     ...(comment ? { comment } : {}),
   };
-  return (s) => settle(s, sub, v.groups, meta.pages, (p) => meta.page[p - 1][3]);
+  return (s) => settle(s, sub, v.groups, meta);
 }
 
 async function applyVerdict(v: RemoteSub) {

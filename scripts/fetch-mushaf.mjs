@@ -121,6 +121,24 @@ function ayahEnds(pg) {
     .join("");
 }
 
+/** Где начинается каждая сура: [страница, строка]. Если сура начинается посреди строки, берётся следующая строка. */
+function surahStarts(all) {
+  const out = [];
+  for (const pg of all) {
+    pg.l.forEach((line, li) => {
+      let vi = line.f;
+      line.w.forEach((w, wi) => {
+        const [s, a] = pg.v[Math.min(vi, pg.v.length - 1)].split(":").map(Number);
+        if (a === 1 && !out[s - 1] && (wi === 0 || typeof line.w[wi - 1] === "number")) {
+          out[s - 1] = wi === 0 ? [pg.p, li] : li + 1 < pg.l.length ? [pg.p, li + 1] : [pg.p + 1, 0];
+        }
+        if (typeof w === "number") vi++;
+      });
+    });
+  }
+  return out;
+}
+
 // Краткие сведения о каждой странице: джуз, первый и последний аят, число строк, концы аятов по строкам.
 async function writeMeta(mushaf, all) {
   const meta = {
@@ -128,6 +146,7 @@ async function writeMeta(mushaf, all) {
     pages: all.length,
     chunk: CHUNK,
     page: all.map((pg) => [pg.j, pg.v[0], pg.v[pg.v.length - 1], pg.l.length, ayahEnds(pg)]),
+    surah: surahStarts(all),
   };
   await writeFile(join(ROOT, "public", "data", mushaf, "meta.json"), JSON.stringify(meta));
 }

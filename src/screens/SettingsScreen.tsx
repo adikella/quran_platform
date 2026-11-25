@@ -3,12 +3,14 @@ import { AccountCard, useJob } from "../components/AccountCard";
 import { InstallCard } from "../components/InstallCard";
 import { TeacherCard } from "../components/TeacherCard";
 import { LANG_NAMES, type Key } from "../i18n";
-import { useT } from "../hooks";
+import { useMeta, useT } from "../hooks";
+import { ManzilSettings } from "../components/ManzilSettings";
 import {
   exportJson,
   importJson,
   patchStudent,
   setActive,
+  setDirection,
   setLang,
   setRole,
   setTheme,
@@ -27,7 +29,6 @@ const NUMBER_FIELDS: (keyof Method)[] = [
   "dailyTarget",
   "maxErrors",
   "sabkiPages",
-  "manzilJuz",
   "naziraJuz",
   "sessionMinutes",
 ];
@@ -37,6 +38,7 @@ export function SettingsScreen({ student, onAddStudent }: { student: Student; on
   const app = useAppState();
   const file = useRef<HTMLInputElement>(null);
   const m = student.method;
+  const meta = useMeta(student.mushaf);
   const setMethod = (patch: Partial<Method>) => patchStudent(student.id, { method: { ...m, ...patch } });
 
   const download = () => {
@@ -126,13 +128,21 @@ export function SettingsScreen({ student, onAddStudent }: { student: Student; on
           {t("direction")}
           <select
             value={student.direction}
-            onChange={(e) => patchStudent(student.id, { direction: Number(e.target.value) as 1 | -1 })}
+            disabled={!meta}
+            onChange={(e) => meta && setDirection(student.id, Number(e.target.value) as 1 | -1, meta)}
           >
             <option value={1}>{t("dir_forward")}</option>
             <option value={-1}>{t("dir_backward")}</option>
           </select>
         </label>
       </section>
+
+      {student.stage === "hifz" && meta && (
+        <section className="card">
+          <h3>{t("col_manzil")}</h3>
+          <ManzilSettings student={student} meta={meta} />
+        </section>
+      )}
 
       <section className="card form">
         <h3>{t("method")}</h3>

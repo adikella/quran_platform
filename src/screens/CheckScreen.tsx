@@ -10,15 +10,14 @@ import { gradeFor, todayKey } from "../method";
 import { submit } from "../store";
 import { ApiError, loadAudio, sendSubmission, type Link, type RemoteSub, type SubMeta, type VerdictIn } from "../sync";
 import { haptic } from "../telegram";
-import type { LineRange, Student, Submission, SubmissionKind } from "../types";
+import type { LineRange, MushafMeta, Student, Submission, SubmissionKind } from "../types";
 
 interface Props {
   student: Student;
   kind: SubmissionKind;
   ranges: LineRange[];
   groups?: number;
-  pages: number;
-  lineCount: (p: number) => number;
+  meta: MushafMeta;
   onClose: () => void;
   /** Ученик записан к учителю: запись можно отправить ему. */
   link?: Link;
@@ -32,7 +31,7 @@ interface Props {
  * запись уходит учителю, а у него в кабинете текст открыт.
  * Нажатие на слово ставит ошибку, второе: ошибку таджвида (обе снижают оценку), третье убирает.
  */
-export function CheckScreen({ student, kind, ranges, groups, pages, lineCount, onClose, link, review }: Props) {
+export function CheckScreen({ student, kind, ranges, groups, meta, onClose, link, review }: Props) {
   const t = useT();
   const surahs = useSurahs();
   const { data } = usePages(
@@ -212,7 +211,7 @@ export function CheckScreen({ student, kind, ranges, groups, pages, lineCount, o
     const m = makeMeta();
     if (!m) return;
     const { date: _date, ...rest } = m;
-    const res = submit(student.id, { ...rest, errors, notes, peeks, seconds: rest.seconds ?? 0 }, pages, lineCount);
+    const res = submit(student.id, { ...rest, errors, notes, peeks, seconds: rest.seconds ?? 0 }, meta);
     haptic(res.passed ? "success" : "error");
     setResult(res);
   };

@@ -5,6 +5,7 @@ import { PageView } from "../components/PageView";
 import { useMeta, usePages, useSessionTimer, useSurahs, useT } from "../hooks";
 import type { Key } from "../i18n";
 import { BRIDGE_WORDS, buildSteps, previousLesson } from "../method";
+import { learnedOf } from "../learned";
 import { versesOfRange } from "../mushaf";
 import { abandonLesson, addRep, addTime, finishLesson, patchStudent, setLessonProgress } from "../store";
 import { haptic } from "../telegram";
@@ -55,8 +56,12 @@ export function LessonScreen({ student, onClose, onSubmitNow }: Props) {
   const [finished, setFinished] = useState(false);
 
   const steps = useMemo(
-    () => (lesson && page ? buildSteps(lesson.range, page.l.length, student.method, previousLesson(student, lesson.range), { oneChunk }) : []),
-    [lesson?.range.page, lesson?.range.from, lesson?.range.to, page, student.method, student.submissions.length, oneChunk],
+    () => {
+      if (!lesson || !page || !meta) return [];
+      const known = learnedOf(student.hifz, meta).get(lesson.range.page) ?? [];
+      return buildSteps(lesson.range, page.l.length, student.method, previousLesson(student, lesson.range, known), { oneChunk, known });
+    },
+    [meta, student.hifz.parts, student.hifz.memorized, lesson?.range.page, lesson?.range.from, lesson?.range.to, page, student.method, student.submissions.length, oneChunk],
   );
 
   // Время урока записывается в дневник при выходе с экрана.

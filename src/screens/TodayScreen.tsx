@@ -2,7 +2,10 @@ import { useState } from "react";
 import { InstallCard } from "../components/InstallCard";
 import { InviteCard, TeacherCard } from "../components/TeacherCard";
 import { useMeta, useNow, usePages, useSurahs, useT } from "../hooks";
-import { dayPart, naziraTargetPages, nextLessonRange, revision, todayKey } from "../method";
+import { NEW_START, startPage, StartPicker, type Start } from "../components/LearnedPicker";
+import { ManzilPlan, ManzilSettings, useUnitLabel } from "../components/ManzilSettings";
+import { nextLesson } from "../learned";
+import { dayPart, naziraTargetPages, revision, todayKey } from "../method";
 import { verseSpanLabel, versesOfRange } from "../mushaf";
 import { beginLesson, lessonReps, startHifz, useAppState } from "../store";
 import { useJob } from "../components/AccountCard";
@@ -142,8 +145,8 @@ function Nazira({ s, meta, go }: { s: Student; meta: MushafMeta; go: Props["go"]
   const range: LineRange = { page, from: 0, to: lc };
   const target = naziraTargetPages(s.method);
   const done = s.nazira.read.length;
-  const [startPage, setStartPage] = useState(1);
-  const [dir, setDir] = useState<1 | -1>(1);
+  const [start, setStart] = useState<Start>(NEW_START);
+  const begin = () => startHifz(s.id, startPage(start, meta), start.dir, meta, start.known ? start.learned : undefined);
 
   return (
     <div className="screen">
@@ -175,64 +178,20 @@ function Nazira({ s, meta, go }: { s: Student; meta: MushafMeta; go: Props["go"]
       {done >= target ? (
         <section className="card accent">
           <p>{t("naziraDone")}</p>
-          <StartPicker meta={meta} page={startPage} setPage={setStartPage} dir={dir} setDir={setDir} />
-          <button onClick={() => startHifz(s.id, startPage, dir)}>{t("startHifz")}</button>
+          <StartPicker meta={meta} value={start} onChange={setStart} />
+          <button onClick={begin}>{t("startHifz")}</button>
         </section>
       ) : (
         <section className="card">
           {/* Попал на чтение случайно или чтение уже пройдено: сразу к заучиванию. */}
           <h3>{t("toHifzTitle")}</h3>
           <p className="muted">{t("toHifzNote")}</p>
-          <StartPicker meta={meta} page={startPage} setPage={setStartPage} dir={dir} setDir={setDir} />
-          <button className="ghost" onClick={() => startHifz(s.id, startPage, dir)}>
+          <StartPicker meta={meta} value={start} onChange={setStart} />
+          <button className="ghost" onClick={begin}>
             {t("startHifz")}
           </button>
         </section>
       )}
-    </div>
-  );
-}
-
-export function StartPicker({
-  meta,
-  page,
-  setPage,
-  dir,
-  setDir,
-}: {
-  meta: MushafMeta;
-  page: number;
-  setPage: (p: number) => void;
-  dir: 1 | -1;
-  setDir: (d: 1 | -1) => void;
-}) {
-  const t = useT();
-  return (
-    <div className="form">
-      <label>
-        {t("startPage")}
-        <input
-          type="number"
-          min={1}
-          max={meta.pages}
-          value={page}
-          onChange={(e) => setPage(Math.max(1, Math.min(meta.pages, Number(e.target.value) || 1)))}
-        />
-      </label>
-      <label>
-        {t("direction")}
-        <select
-          value={dir}
-          onChange={(e) => {
-            const d = Number(e.target.value) as 1 | -1;
-            setDir(d);
-            setPage(d === -1 ? meta.pages : 1);
-          }}
-        >
-          <option value={1}>{t("dir_forward")}</option>
-          <option value={-1}>{t("dir_backward")}</option>
-        </select>
-      </label>
     </div>
   );
 }
@@ -242,18 +201,20 @@ function Hifz({ s, meta, go }: { s: Student; meta: MushafMeta; go: Props["go"] }
   const m = s.method;
   const lineCount = (p: number) => meta.page[p - 1][3];
   const juzOf = (p: number) => meta.page[p - 1][0];
-  const rev = revision(s, juzOf, lineCount);
-  const { cur, pending, lesson, memorized } = s.hifz;
-  const finished = memorized.includes(cur.page) && cur.line >= lineCount(cur.page);
-  const manzilRanges: LineRange[] = rev.manzilToday.flatMap((g) => g.pages.map((p) => ({ page: p, from: 0, to: lineCount(p) })));
+  const rev = revision(s, meta);
+  const { pending, lesson } = s.hifz;
+  const next = nextLesson(s, meta);
+  const manzilRanges: LineRange[] = rev.manzilToday.flatMap((g) => g.ranges);
+  // Сдал сегодняшнее: на очереди уже завтрашнее.
+  const manzilDone = s.submissions.some((x) => x.kind === "manzil" && x.passed && x.date === todayKey());
+  const manzilTomorrow = rev.manzilQueue.slice(rev.manzilToday.length, rev.manzilToday.length * 2);
   const sabkiCount = rev.sabki.length;
   const now = useNow(30000);
   const part = dayPart(now, m);
   const nowKey = (part === "submit" && !pending ? "now_submitNone" : `now_${part}`) as Key;
   const surahs = useSurahs();
   const { lang } = useAppState();
-  /** Манзиль записывается так: джуз и страницы. */
-  const manzilLine = (g: { juz: number; pages: number[] }) => t("manzilGroup", { j: g.juz, a: Math.min(...g.pages), b: Math.max(...g.pages) });
+  const manzilLine = useUnitLabel();
   // Сабки записывается так: джуз, сура и аяты (с какого по какой), включая неполную страницу.
   const { data: sabkiPages } = usePages(s.mushaf, rev.sabki.map((r) => r.page));
   const sabkiVerses = sabkiPages
@@ -265,9 +226,6 @@ function Hifz({ s, meta, go }: { s: Student; meta: MushafMeta; go: Props["go"] }
     : [];
   const sabkiSpan = sabkiVerses.length ? verseSpanLabel(sabkiVerses[0], sabkiVerses[sabkiVerses.length - 1], surahs, lang) : "";
   const sabkiJuz = rev.sabki.length ? juzOf(rev.sabki[0].page) : 0;
-  const manzilNextGroup = rev.manzilGroups.length > rev.manzilToday.length
-    ? rev.manzilGroups[(s.hifz.manzilCursor + rev.manzilToday.length) % rev.manzilGroups.length]
-    : null;
 
   return (
     <div className="screen">
@@ -341,15 +299,15 @@ function Hifz({ s, meta, go }: { s: Student; meta: MushafMeta; go: Props["go"] }
         {rev.manzilToday.length ? (
           <>
             <div className="manzil-today">
-              <span className="muted">{t("manzilTodayLead")}:</span>
+              <span className="muted">{t(manzilDone ? "mz_doneLead" : "manzilTodayLead")}:</span>
               {rev.manzilToday.map((g) => (
-                <p key={g.juz}>
+                <p key={`${g.juz}.${g.half ?? 0}`}>
                   <b>{manzilLine(g)}</b>
                 </p>
               ))}
-              {manzilNextGroup && (
+              {!manzilDone && manzilTomorrow.length > 0 && (
                 <p className="muted">
-                  {t("manzilNext")}: {manzilLine(manzilNextGroup)}
+                  {t("manzilNext")}: {manzilTomorrow.map(manzilLine).join("; ")}
                 </p>
               )}
             </div>
@@ -361,11 +319,17 @@ function Hifz({ s, meta, go }: { s: Student; meta: MushafMeta; go: Props["go"] }
                 {t("readCounter")}
               </button>
               <button
+                className={manzilDone ? "ghost" : ""}
                 onClick={() => go({ name: "check", kind: "manzil", ranges: manzilRanges, groups: rev.manzilToday.length })}
               >
                 {t("manzilSubmit")}
               </button>
             </div>
+            <details className="more">
+              <summary>{t("mz_more")}</summary>
+              <ManzilPlan student={s} meta={meta} first={manzilDone ? 1 : 0} />
+              <ManzilSettings student={s} meta={meta} />
+            </details>
           </>
         ) : (
           <p className="muted">{t("nothingYet")}</p>
@@ -376,21 +340,21 @@ function Hifz({ s, meta, go }: { s: Student; meta: MushafMeta; go: Props["go"] }
       <div className="block-label">{t("afterMorning", { b: m.morningEnd })}</div>
       <section className="card accent">
         <h3>{t("newLesson")}</h3>
-        {finished ? (
-          <p>{t("hifzFinished")}</p>
-        ) : lesson ? (
+        {lesson ? (
           <>
             <p>{rangeText(lesson.range, lineCount(lesson.range.page), t)}</p>
             <button onClick={() => go({ name: "lesson" })}>{t("continueLesson")}</button>
           </>
         ) : pending ? (
           <p className="muted">{t("blockedByPending")}</p>
+        ) : !next ? (
+          <p>{t("hifzFinished")}</p>
         ) : (
           <>
-            <p>{rangeText(nextLessonRange(cur.page, cur.line, lineCount(cur.page), s.volume), lineCount(cur.page), t)}</p>
+            <p>{rangeText(next, lineCount(next.page), t)}</p>
             <button
               onClick={() => {
-                beginLesson(s.id, lineCount(cur.page));
+                beginLesson(s.id, meta);
                 go({ name: "lesson" });
               }}
             >

@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { mergeStudents, settle } from "./merge";
 import { DEFAULT_METHOD } from "./method";
-import type { Student, Submission } from "./types";
+import type { MushafMeta, Student, Submission } from "./types";
+import { madani } from "./testMeta";
 
 const base: Student = {
   id: "s1", name: "Али", mushaf: "madani", stage: "hifz", volume: "half", direction: 1, method: DEFAULT_METHOD,
@@ -13,8 +14,8 @@ const sub = (o: Partial<Submission> = {}): Submission => ({
   id: "a", date: "2026-11-25", kind: "sabak", ranges: [{ page: 4, from: 0, to: 8 }], fromVerse: "2:17", toVerse: "2:20",
   errors: 0, notes: 0, grade: 5, passed: true, seconds: 60, ...o,
 });
-const lines = () => 15;
-const apply = (s: Student, x: Submission, groups?: number) => settle(s, x, groups, 604, lines);
+const meta: MushafMeta = madani;
+const apply = (s: Student, x: Submission, groups?: number) => settle(s, x, groups, meta);
 
 describe("settle", () => {
   it("принятый урок двигает дальше по странице", () => {
@@ -44,7 +45,9 @@ describe("settle", () => {
     expect(r.submissions).toHaveLength(1);
   });
   it("давнее идёт по кругу", () => {
-    expect(apply(base, sub({ kind: "manzil" }), 2).hifz.manzilCursor).toBe(2);
+    const r = apply(base, sub({ kind: "manzil", ranges: [{ page: 1, from: 0, to: 7 }, { page: 21, from: 0, to: 15 }] }), 2);
+    expect(r.hifz.manzilCursor).toBe(2);
+    expect(r.hifz.manzilAt).toBe(21);
   });
 });
 
@@ -67,6 +70,15 @@ describe("mergeStudents", () => {
     const day = (reps: number, sabak: number) => ({ d: { reps, seconds: { sabak }, learned: [] } });
     const r = mergeStudents({ ...base, days: day(50, 10) }, { ...base, days: day(30, 40) });
     expect(r.days.d).toEqual({ reps: 50, seconds: { sabak: 40 }, learned: [] });
+  });
+  it("круг давнего берётся с того устройства, где его сдавали", () => {
+    const x = { ...apply(base, sub({ kind: "manzil", ranges: [{ page: 21, from: 0, to: 15 }] })), updatedAt: 200 };
+    expect(mergeStudents({ ...base, name: "Вали", updatedAt: 300 }, x).hifz.manzilAt).toBe(21);
+  });
+  it("отмеченное выученным не откатывается старой копией", () => {
+    const marked = { ...base, updatedAt: 200, hifz: { ...base.hifz, memorized: [], parts: { 583: [[0, 7]] as [number, number][] } } };
+    const empty = { ...base, updatedAt: 300, hifz: { ...base.hifz, memorized: [] } };
+    expect(mergeStudents(empty, marked).hifz.parts).toEqual({ 583: [[0, 7]] });
   });
   it("выученный урок важнее урока в работе", () => {
     const learning = { ...base, updatedAt: 500, hifz: { ...base.hifz, pending: null, lesson: { range: base.hifz.pending!, step: 1, done: 2 } } };

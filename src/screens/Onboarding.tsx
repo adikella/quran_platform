@@ -5,7 +5,7 @@ import { useMeta, useT } from "../hooks";
 import { addStudent, setLang, useAppState } from "../store";
 import { becomeTeacher, useSync } from "../sync";
 import type { Lang, MushafId, Stage, Volume } from "../types";
-import { StartPicker } from "./TodayScreen";
+import { NEW_START, startPage, StartPicker, type Start } from "../components/LearnedPicker";
 
 /** Первый запуск (вход, кто ты) или новый ученик: имя, мусхаф, этап, объём урока. */
 export function Onboarding({ onDone, onCancel }: { onDone: () => void; onCancel?: () => void }) {
@@ -16,8 +16,7 @@ export function Onboarding({ onDone, onCancel }: { onDone: () => void; onCancel?
   const [mushaf, setMushaf] = useState<MushafId>("madani");
   const [stage, setStage] = useState<Stage>("nazira");
   const [volume, setVolume] = useState<Volume>("lines2");
-  const [page, setPage] = useState(1);
-  const [dir, setDir] = useState<1 | -1>(1);
+  const [start, setStart] = useState<Start>(NEW_START);
   const meta = useMeta(mushaf);
 
   const first = !onCancel;
@@ -35,7 +34,20 @@ export function Onboarding({ onDone, onCancel }: { onDone: () => void; onCancel?
   }, [first, account]);
 
   const create = () => {
-    addStudent({ name, mushaf, stage, volume, direction: dir, startPage: stage === "nazira" ? 1 : page });
+    if (!meta) return;
+    const hifz = stage === "hifz";
+    addStudent(
+      {
+        name,
+        mushaf,
+        stage,
+        volume,
+        direction: hifz ? start.dir : 1,
+        startPage: hifz ? startPage(start, meta) : 1,
+        learned: hifz && start.known ? start.learned : undefined,
+      },
+      meta,
+    );
     onDone();
   };
 
@@ -116,8 +128,8 @@ export function Onboarding({ onDone, onCancel }: { onDone: () => void; onCancel?
               className={`choice ${mushaf === m ? "on" : ""}`}
               onClick={() => {
                 setMushaf(m);
-                setPage(1);
-                setDir(1);
+                // Строки у мусхафов разные: отмеченное в одном к другому не подходит.
+                setStart(NEW_START);
               }}
             >
               <b>{t(m)}</b>
@@ -137,7 +149,7 @@ export function Onboarding({ onDone, onCancel }: { onDone: () => void; onCancel?
             </button>
           ))}
         </div>
-        {stage === "hifz" && meta && <StartPicker meta={meta} page={page} setPage={setPage} dir={dir} setDir={setDir} />}
+        {stage === "hifz" && meta && <StartPicker key={mushaf} meta={meta} value={start} onChange={setStart} />}
       </section>
 
       <section className="card">
@@ -151,7 +163,7 @@ export function Onboarding({ onDone, onCancel }: { onDone: () => void; onCancel?
         </div>
       </section>
 
-      <button className="wide" onClick={create}>
+      <button className="wide" onClick={create} disabled={!meta}>
         {t("start")}
       </button>
       {onCancel && (

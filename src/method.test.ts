@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { buildSteps, chunkLines, dayPart, DEFAULT_METHOD, gradeFor, nextLessonRange, revision } from "./method";
-import type { Student } from "./types";
+import { buildSteps, chunkLines, dayPart, DEFAULT_METHOD, gradeFor, manzilBefore, manzilDays, nextLessonRange, revision } from "./method";
+import { madani } from "./testMeta";
+import type { LineRange, Student } from "./types";
 
 // Методика с шагом «наизусть 20 раз», который устаз может включить в настройках.
 const M = { ...DEFAULT_METHOD, heart: 20 };
@@ -82,51 +83,83 @@ describe("gradeFor", () => {
   });
 });
 
-describe("revision", () => {
-  const juzOf = (p: number) => Math.ceil(p / 20);
-  const lines = () => 15;
-  const student = (memorized: number[], line = 0, cursor = 0): Pick<Student, "hifz" | "method"> => ({
-    method: DEFAULT_METHOD,
-    hifz: {
-      memorized,
-      cur: { page: (memorized.at(-1) ?? 0) + 1, line },
-      pending: null,
-      lesson: null,
-      manzilCursor: cursor,
-    },
+describe("соединение", () => {
+  const joins = (range: LineRange, count: number, known?: [number, number][], prev?: LineRange) =>
+    buildSteps(range, count, DEFAULT_METHOD, prev, { oneChunk: true, known }).filter((s) => s.kind === "join").map((s) => [s.range.from, s.range.to]);
+  it("последняя сура страницы не соединяется с невыученным перед ней", () => {
+    expect(joins({ page: 604, from: 5, to: 9 }, 9, [])).toEqual([]);
   });
+  it("урок, который закрыл страницу, соединяется со всей страницей", () => {
+    expect(joins({ page: 604, from: 0, to: 2 }, 9, [[2, 9]])).toEqual([[0, 9]]);
+    expect(joins({ page: 5, from: 8, to: 15 }, 15)).toEqual([[0, 15]]);
+  });
+  it("целая страница одним уроком не соединяется", () => {
+    expect(joins({ page: 5, from: 0, to: 15 }, 15)).toEqual([]);
+  });
+});
+
+describe("revision", () => {
+  const student = (pages: number[], o: Partial<Student["hifz"]> = {}, method = {}): Pick<Student, "hifz" | "method" | "direction" | "volume"> => ({
+    method: { ...DEFAULT_METHOD, ...method },
+    direction: 1,
+    volume: "page",
+    hifz: { memorized: pages, parts: {}, cur: { page: (pages.at(-1) ?? 0) + 1, line: 0 }, pending: null, lesson: null, manzilCursor: 0, ...o },
+  });
+  const upTo = (n: number, from = 1) => Array.from({ length: n - from + 1 }, (_, i) => from + i);
+  const juz = (u: { juz: number }[]) => u.map((g) => g.juz);
 
   it("сабки сдаются пачками по 10: выучено 14, сдаются первые 10, остальные 4 ждут", () => {
-    const r = revision(student(Array.from({ length: 14 }, (_, i) => i + 1), 0), juzOf, lines);
+    const r = revision(student(upTo(14)), madani);
     expect(r.sabki.map((x) => x.page)).toEqual([10, 9, 8, 7, 6, 5, 4, 3, 2, 1]);
     expect(r.sabkiWaiting).toEqual([11, 12, 13, 14]);
-    expect(r.manzilGroups).toEqual([]);
+    expect(r.manzilQueue).toEqual([]);
   });
-
-  it("выучено 24 страницы джуза: сдаётся вторая пачка (11–20), прошлые джузы в манзиль", () => {
-    // juzOf здесь по 30 страниц, чтобы в джузе поместилось больше двух пачек
-    const juz30 = (p: number) => Math.ceil(p / 30);
-    const r = revision(student(Array.from({ length: 54 }, (_, i) => i + 1), 0), juz30, lines);
-    // страницы 31–54 это джуз 2: выучено 24, полных пачек 2, сдаются страницы 41–50
-    expect(r.sabki.map((x) => x.page)).toEqual([50, 49, 48, 47, 46, 45, 44, 43, 42, 41]);
-    expect(r.manzilGroups.map((g) => g.juz)).toEqual([1]);
+  it("прошлые джузы в манзиль, текущий в сабки", () => {
+    const r = revision(student(upTo(44)), madani);
+    expect(r.sabki.map((x) => x.page)).toEqual([44, 43, 42]);
+    expect(juz(r.manzilQueue)).toEqual([1, 2]);
   });
-
-  it("новичок: пока выучено меньше 10 страниц одного джуза, всё это сабки и манзиля нет", () => {
-    const r = revision(student([1, 2, 3], 4), juzOf, lines);
+  it("новичок: выучено меньше 10 страниц джуза, всё это сабки и манзиля нет", () => {
+    const r = revision(student([1, 2, 3], { parts: undefined, cur: { page: 4, line: 4 } }), madani);
     expect(r.sabki[0]).toEqual({ page: 4, from: 0, to: 4 });
     expect(r.sabki.slice(1).map((x) => x.page)).toEqual([3, 2, 1]);
-    expect(r.manzilGroups).toEqual([]);
     expect(r.manzilToday).toEqual([]);
   });
-
-  it("манзиль — до 2 джузов за утро, по кругу", () => {
-    const pages = Array.from({ length: 70 }, (_, i) => i + 1);
-    const r0 = revision(student(pages, 0, 0), juzOf, lines);
-    expect(r0.manzilGroups.map((g) => g.juz)).toEqual([1, 2, 3]);
-    expect(r0.manzilToday.map((g) => g.juz)).toEqual([1, 2]);
-    const r1 = revision(student(pages, 0, 2), juzOf, lines);
-    expect(r1.manzilToday.map((g) => g.juz)).toEqual([3, 1]);
+  it("10 джузов: по 2 за утро, круг 5 дней, следующий после сданного", () => {
+    const s = student(upTo(201));
+    const r = revision(s, madani);
+    expect(juz(r.manzilToday)).toEqual([1, 2]);
+    expect(manzilDays(r, s.method)).toHaveLength(5);
+    expect(juz(revision(student(upTo(201), { manzilAt: 41 }), madani).manzilToday)).toEqual([3, 4]);
+    expect(juz(revision(student(upTo(201), { manzilAt: 201 }), madani).manzilToday)).toEqual([1, 2]);
+  });
+  it("новый выученный джуз не сбивает круг", () => {
+    const r = revision(student(upTo(221), { manzilAt: 181, manzilCursor: 23 }), madani);
+    expect(juz(r.manzilToday)).toEqual([10, 11]);
+  });
+  it("круг вверх и выбор, с чего начать", () => {
+    const s = student(upTo(201), {}, { manzilDir: -1 });
+    const r = revision(s, madani);
+    expect(juz(r.manzilToday)).toEqual([10, 9]);
+    const at = manzilBefore(r.manzilQueue, r.manzilQueue.find((u) => u.juz === 4)!);
+    expect(juz(revision({ ...s, hifz: { ...s.hifz, manzilAt: at } }, madani).manzilToday)).toEqual([4, 3]);
+  });
+  it("по половине джуза", () => {
+    const s = student(upTo(41), {}, { manzilJuz: 0.5 });
+    const r = revision(s, madani);
+    expect(r.manzilQueue.map((u) => [u.juz, u.half])).toEqual([[1, 1], [1, 2], [2, 1], [2, 2]]);
+    expect(r.manzilToday).toHaveLength(1);
+    const next = revision({ ...s, hifz: { ...s.hifz, manzilAt: 11 } }, madani);
+    expect([next.manzilToday[0].juz, next.manzilToday[0].half]).toEqual([1, 2]);
+  });
+  it("выученная сура чужого джуза идёт в манзиль по строкам", () => {
+    const r = revision(student([1, 2, 582], { parts: { 583: [[0, 7]] }, cur: { page: 3, line: 0 } }), madani);
+    expect(r.manzilToday).toEqual([{ juz: 30, ranges: [{ page: 582, from: 0, to: 13 }, { page: 583, from: 0, to: 7 }] }]);
+  });
+  it("весь мусхаф выучен: сабки нет, всё в манзиле", () => {
+    const r = revision(student(upTo(604), { cur: { page: 604, line: 9 } }), madani);
+    expect(r.sabki).toEqual([]);
+    expect(r.manzilQueue).toHaveLength(30);
   });
 });
 

@@ -57,7 +57,6 @@ export function App() {
   }
 
   const close = () => setNav(null);
-  const lineCount = (p: number) => meta?.page[p - 1][3] ?? 15;
 
   if (nav?.name === "lesson") {
     return <LessonScreen student={student} onClose={close} onSubmitNow={() => {
@@ -73,8 +72,7 @@ export function App() {
         kind={nav.kind}
         ranges={nav.ranges}
         groups={nav.groups}
-        pages={meta.pages}
-        lineCount={lineCount}
+        meta={meta}
         onClose={close}
         link={links.find((l) => l.student === student.id && l.status === "active")}
       />
@@ -110,6 +108,7 @@ export function App() {
         {tab === "journal" && <JournalScreen student={student} onOpen={(sub) => setNav({ name: "result", sub })} />}
         {tab === "progress" && (
           <ProgressScreen
+            edit
             student={student}
             openPage={(p) => {
               setMushafPage(p);

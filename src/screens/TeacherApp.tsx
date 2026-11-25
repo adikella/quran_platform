@@ -115,8 +115,7 @@ function TeacherCheck({ check, onClose }: { check: Check; onClose: () => void })
       kind={check.kind}
       ranges={check.ranges}
       groups={check.groups}
-      pages={meta.pages}
-      lineCount={(p) => meta.page[p - 1][3]}
+      meta={meta}
       onClose={onClose}
       review={{
         sub: check.sub,
@@ -392,7 +391,7 @@ function GroupTab({
 function todaysWork(s: Student, meta: MushafMeta): Check[] {
   const lines = (p: number) => meta.page[p - 1][3];
   if (s.stage === "nazira") return [{ student: s, kind: "nazira", ranges: [{ page: s.nazira.next, from: 0, to: lines(s.nazira.next) }] }];
-  const rev = revision(s, (p) => meta.page[p - 1][0], lines);
+  const rev = revision(s, meta);
   const out: Check[] = [];
   if (s.hifz.pending) out.push({ student: s, kind: "sabak", ranges: [s.hifz.pending] });
   if (rev.sabki.length) out.push({ student: s, kind: "sabki", ranges: rev.sabki });
@@ -400,7 +399,7 @@ function todaysWork(s: Student, meta: MushafMeta): Check[] {
     out.push({
       student: s,
       kind: "manzil",
-      ranges: rev.manzilToday.flatMap((g) => g.pages.map((p) => ({ page: p, from: 0, to: lines(p) }))),
+      ranges: rev.manzilToday.flatMap((g) => g.ranges),
       groups: rev.manzilToday.length,
     });
   }

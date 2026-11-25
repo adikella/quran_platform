@@ -17,7 +17,7 @@ async function getJson<T>(path: string): Promise<T> {
 export function loadMeta(m: MushafId): Promise<MushafMeta> {
   let p = metaCache.get(m);
   if (!p) {
-    p = getJson<MushafMeta>(`${m}/meta.json`);
+    p = getJson<MushafMeta>(`${m}/meta.json?v=2`);
     p.catch(() => metaCache.delete(m));
     metaCache.set(m, p);
   }
