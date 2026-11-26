@@ -110,19 +110,19 @@ describe("revision", () => {
 
   it("сабки сдаются пачками по 10: выучено 14, сдаются первые 10, остальные 4 ждут", () => {
     const r = revision(student(upTo(14)), madani);
-    expect(r.sabki.map((x) => x.page)).toEqual([10, 9, 8, 7, 6, 5, 4, 3, 2, 1]);
+    expect(r.sabki.map((x) => x.page)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
     expect(r.sabkiWaiting).toEqual([11, 12, 13, 14]);
     expect(r.manzilQueue).toEqual([]);
   });
   it("прошлые джузы в манзиль, текущий в сабки", () => {
     const r = revision(student(upTo(44)), madani);
-    expect(r.sabki.map((x) => x.page)).toEqual([44, 43, 42]);
+    expect(r.sabki.map((x) => x.page)).toEqual([42, 43, 44]);
     expect(juz(r.manzilQueue)).toEqual([1, 2]);
   });
   it("новичок: выучено меньше 10 страниц джуза, всё это сабки и манзиля нет", () => {
     const r = revision(student([1, 2, 3], { parts: undefined, cur: { page: 4, line: 4 } }), madani);
-    expect(r.sabki[0]).toEqual({ page: 4, from: 0, to: 4 });
-    expect(r.sabki.slice(1).map((x) => x.page)).toEqual([3, 2, 1]);
+    expect(r.sabki.map((x) => x.page)).toEqual([1, 2, 3, 4]);
+    expect(r.sabki[3]).toEqual({ page: 4, from: 0, to: 4 });
     expect(r.manzilToday).toEqual([]);
   });
   it("10 джузов: по 2 за утро, круг 5 дней, следующий после сданного", () => {
@@ -143,6 +143,11 @@ describe("revision", () => {
     expect(juz(r.manzilToday)).toEqual([10, 9]);
     const at = manzilBefore(r.manzilQueue, r.manzilQueue.find((u) => u.juz === 4)!);
     expect(juz(revision({ ...s, hifz: { ...s.hifz, manzilAt: at } }, madani).manzilToday)).toEqual([4, 3]);
+  });
+  it("снизу вверх: недавнее по порядку мусхафа, а не по порядку заучивания", () => {
+    const s = { ...student([604, 603, 585], { parts: { 586: [[0, 1]], 599: [[0, 5]], 582: [[0, 13]] }, cur: { page: 598, line: 0 } }), direction: -1 as const };
+    const r = revision(s, madani);
+    expect(r.sabki.map((x) => x.page)).toEqual([582, 585, 586, 599, 603, 604]);
   });
   it("по половине джуза", () => {
     const s = student(upTo(41), {}, { manzilJuz: 0.5 });

@@ -155,7 +155,7 @@ export interface ManzilUnit {
 }
 
 export interface Revision {
-  /** Сабки: учится сейчас. Сданные строки текущей страницы и выученные страницы текущего джуза. */
+  /** Сабки: учится сейчас, по порядку мусхафа. Сданные строки текущей страницы и выученные страницы текущего джуза. */
   sabki: LineRange[];
   /** Выученные страницы текущего джуза, которые ждут, пока наберётся полная пачка. */
   sabkiWaiting: number[];
@@ -215,11 +215,12 @@ export function revision(s: Learner, meta: MushafMeta): Revision {
   const recent = fullBlocks > 0 ? inCurrent.slice((fullBlocks - 1) * block, fullBlocks * block) : inCurrent;
   const sabkiWaiting = fullBlocks > 0 ? inCurrent.slice(fullBlocks * block) : [];
   if (fullBlocks === 0 && place) {
-    const near = (p: number) => Math.abs(p - place.page);
-    const parts = [...learned].filter(([p]) => juzOf(meta, p) === curJuz && !inCurrent.includes(p)).sort(([a], [b]) => near(a) - near(b));
+    const parts = [...learned].filter(([p]) => juzOf(meta, p) === curJuz && !inCurrent.includes(p));
     for (const [page, spans] of parts) sabki.push(...spans.map(([from, to]) => ({ page, from, to })));
   }
-  for (let i = recent.length - 1; i >= 0; i--) sabki.push(full(recent[i]));
+  for (const p of recent) sabki.push(full(p));
+  // Сдают подряд, как в мусхафе: по страницам и строкам.
+  sabki.sort((a, b) => a.page - b.page || a.from - b.from);
 
   const units = manzilUnits(s, meta, curJuz);
   let next = 0;
