@@ -1237,7 +1237,72 @@ button.link.inline {
 
 .mate-near {
   text-align: start;
+  white-space: pre-line;
 }
 .card.accent > button.wide + button.wide {
   margin-top: 8px;
+}
+
+/* Кнопка счёта, которая ездит за чтецом, когда большой счётчик ушёл за экран. */
+.float-counter {
+  position: fixed;
+  z-index: 6;
+  width: 64px;
+  height: 64px;
+  padding: 0;
+  border-radius: 50%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  border: 0;
+  color: var(--accent-text);
+  background: conic-gradient(var(--accent-text) var(--pct), color-mix(in srgb, var(--accent-text) 25%, transparent) 0);
+  box-shadow: 0 2px 4px rgb(0 0 0 / 0.12), 0 8px 20px -6px color-mix(in srgb, var(--accent) 60%, transparent);
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  transition: top 0.18s ease, left 0.18s ease, right 0.18s ease, transform 0.1s ease;
+  animation: float-in 0.18s ease;
+}
+.float-counter::before {
+  content: "";
+  position: absolute;
+  inset: 4px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.float-counter span {
+  position: relative;
+  line-height: 1;
+}
+.float-count {
+  font-size: 24px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.float-target {
+  font-size: 11px;
+  opacity: 0.85;
+}
+.float-counter:active {
+  transform: scale(0.94);
+}
+.float-counter.dragging {
+  transition: none;
+  transform: scale(1.08);
+}
+@keyframes float-in {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .float-counter {
+    transition: none;
+    animation: none;
+  }
 }

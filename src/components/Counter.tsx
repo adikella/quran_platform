@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { fmtDuration, useNow, useT } from "../hooks";
 import { secondsUntil } from "../method";
+import { FloatCounter } from "./FloatCounter";
 import { haptic } from "../telegram";
 import type { useSessionTimer } from "../hooks";
 
@@ -45,6 +46,7 @@ export function Counter({
   const remaining = limitMinutes * 60 - timer.elapsed;
   const over = countdown && remaining <= 0;
   const signalled = useRef(false);
+  const plus = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     signalled.current = false;
   }, [limitMinutes]);
@@ -63,6 +65,7 @@ export function Counter({
           {t("undo")}
         </button>
         <button
+          ref={plus}
           className="plus"
           onClick={onInc}
           style={{ "--pct": `${pct}%` } as React.CSSProperties}
@@ -122,6 +125,8 @@ export function Counter({
           {t("timerUp")}
         </button>
       </div>
+
+      <FloatCounter anchor={plus} count={count} target={target} onInc={onInc} />
 
       {daily && (
         <div className="daily">

@@ -5,11 +5,12 @@
 
 import { useSyncExternalStore } from "react";
 import { mergeStudents, settle } from "./merge";
-import { loadMeta } from "./mushaf";
-import { makePlan, type PlanItem } from "./plan";
+import { revision } from "./method";
+import { loadMeta, loadPage, loadSurahs } from "./mushaf";
+import { makePlan, partialPages, type Names, type PlanItem } from "./plan";
 import { adoptStudent, changeStudent, getState, removeStudent, renewStudent, setRole, subscribe } from "./store";
 import { telegramUserId, telegramInitData } from "./telegram";
-import type { LineRange, MushafId, Student, Submission, SubmissionKind } from "./types";
+import type { LineRange, MushafId, MushafMeta, Student, Submission, SubmissionKind } from "./types";
 
 const KEY = "quran-platform:auth";
 const JOIN = "quran-platform:join";
@@ -431,6 +432,20 @@ async function push(a: Auth, id: string): Promise<boolean> {
   return false;
 }
 
+/** Названия сур и страницы, где отрывки начинаются посреди страницы. Без сети напоминание уйдёт со страницами. */
+async function names(s: Student, meta: MushafMeta): Promise<Names | undefined> {
+  if (s.stage !== "hifz") return undefined;
+  try {
+    const rev = revision(s, meta);
+    const ranges = [...rev.sabki, ...rev.manzilToday.flatMap((u) => u.ranges)];
+    const pages = partialPages(ranges, meta);
+    const [surahs, data] = await Promise.all([loadSurahs(), Promise.all(pages.map((p) => loadPage(s.mushaf, p)))]);
+    return { surahs, pages: new Map(pages.map((p, i) => [p, data[i]])) };
+  } catch {
+    return undefined;
+  }
+}
+
 /** Отправить план повторения, если он изменился. Неудача не мешает обмену: план уйдёт в следующий раз. */
 async function pushPlan(a: Auth, id: string) {
   const s = getState().students.find((x) => x.id === id);
@@ -439,7 +454,7 @@ async function pushPlan(a: Auth, id: string) {
   try {
     const meta = await loadMeta(s.mushaf);
     const tz = Intl.DateTimeFormat().resolvedOptions().timeZone ?? "";
-    const plan = makePlan(s, meta, getState().lang, tz);
+    const plan = makePlan(s, meta, getState().lang, tz, await names(s, meta));
     const text = JSON.stringify(plan);
     if (known.plan === text) return;
     await api("PUT", `/students/${id}/plan`, plan);
