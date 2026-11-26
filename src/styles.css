@@ -1306,3 +1306,30 @@ button.link.inline {
     animation: none;
   }
 }
+
+/* Подсказка над клеткой карты: какие суры и аяты на странице. */
+.page-hint {
+  position: fixed;
+  z-index: 8;
+  transform: translate(-50%, calc(-100% - 8px));
+  width: max-content;
+  max-width: 220px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: var(--text);
+  color: var(--bg);
+  font-size: 13px;
+  line-height: 1.35;
+  display: flex;
+  flex-direction: column;
+  pointer-events: none;
+  box-shadow: 0 6px 18px -6px rgb(0 0 0 / 0.35);
+}
+.page-hint b {
+  font-weight: 700;
+}
+.cells .cell {
+  -webkit-touch-callout: none;
+  user-select: none;
+  -webkit-user-select: none;
+}

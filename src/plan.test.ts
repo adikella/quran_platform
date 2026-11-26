@@ -54,3 +54,15 @@ describe("напоминание сурами, аятами и страница�
     expect(pagesText([{ page: 5, from: 0, to: 2 }], t)).toBe("стр. 5");
   });
 });
+
+describe("подсказка на карте", () => {
+  it("какие суры и аяты на странице", async () => {
+    const { pageSurahs } = await import("./mushaf");
+    expect(pageSurahs(madani, 601, surahs as Surah[])).toEqual([
+      { surah: 103, from: 1, to: 3 },
+      { surah: 104, from: 1, to: 9 },
+      { surah: 105, from: 1, to: 5 },
+    ]);
+    expect(pageSurahs(madani, 3, surahs as Surah[])).toEqual([{ surah: 2, from: 6, to: 16 }]);
+  });
+});

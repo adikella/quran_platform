@@ -112,3 +112,13 @@ export function surahStarts(page: PageData): { surah: number; beforeLine: number
   });
   return out;
 }
+
+/** Какие суры и аяты на странице: [{ surah, from, to }], по разметке мусхафа. */
+export function pageSurahs(meta: MushafMeta, page: number, surahs: Surah[]): { surah: number; from: number; to: number }[] {
+  const [, first, last] = meta.page[page - 1];
+  const [sa, va] = first.split(":").map(Number);
+  const [sb, vb] = last.split(":").map(Number);
+  const out = [];
+  for (let s = sa; s <= sb; s++) out.push({ surah: s, from: s === sa ? va : 1, to: s === sb ? vb : (surahs[s - 1]?.ayahs ?? 0) });
+  return out;
+}
