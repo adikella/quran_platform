@@ -394,6 +394,11 @@ label.check-row input {
 .qcf .line {
   gap: 0.22em;
 }
+/* Как в печатном мединском мусхафе: буквы толще. У шрифта нет жирного начертания, утолщаем обводкой того же цвета. */
+.page .line {
+  -webkit-text-stroke: 0.06em currentColor;
+  paint-order: stroke fill;
+}
 .qcf .surah-title,
 .qcf .basmala {
   font-family: "Hafs", "Scheherazade New", serif;
