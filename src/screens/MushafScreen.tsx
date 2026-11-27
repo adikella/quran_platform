@@ -39,7 +39,7 @@ export function MushafScreen({ mushaf, page, setPage }: { mushaf: MushafId; page
   const [open, setOpen] = useState(false);
 
   return (
-    <div className={`screen ${wide ? "screen-spread" : ""}`}>
+    <div className={`screen ${wide ? "screen-spread" : "screen-mushaf"}`}>
       <div className="mushaf-nav">
         <button
           className="ghost small icon-btn"

@@ -447,6 +447,18 @@ label.check-row input {
 .spread > .page {
   flex: 1 1 0;
 }
+/* Мусхаф на телефоне: страница во всю ширину и строки свободнее, как в приложении Комплекса короля Фахда. */
+.screen-mushaf .spread {
+  margin-inline: -16px;
+}
+.screen-mushaf .page {
+  border-radius: 0;
+  border-inline: 0;
+  padding: 12px 8px;
+}
+.screen-mushaf .page-madani {
+  line-height: 2.3;
+}
 .screen.screen-spread {
   max-width: 1360px;
 }
