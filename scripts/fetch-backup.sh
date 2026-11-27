@@ -12,7 +12,7 @@ ok=1
 # После сна сеть появляется не сразу: пробуем несколько раз.
 for wait in 0 30 120; do
   sleep "${QURAN_WAIT:-$wait}"
-  rsync -az --rsync-path="sudo rsync" -e "ssh -i $KEY -o BatchMode=yes -o ConnectTimeout=20" "$HOST:/var/backups/quran/" "$DIR/" && ok=0 && break
+  rsync -az --rsync-path="sudo rsync" -e "ssh -i $KEY -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=4" --timeout=120 "$HOST:/var/backups/quran/" "$DIR/" && ok=0 && break
 done
 
 newest=$(ls "$DIR" | grep -E '^quran-20[0-9-]{8}\.db\.gz$' | sort | tail -1)
