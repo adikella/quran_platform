@@ -840,8 +840,216 @@ button.sticky-cta {
   align-items: center;
   justify-content: space-between;
 }
-.mushaf-nav select {
-  width: auto;
+.mushaf-nav .icon-btn {
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  flex: none;
+}
+.index-open {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 6px 12px;
+  direction: auto;
+}
+.index-open span {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.25;
+}
+.index-open b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.index-open small {
+  font-weight: 500;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* ---------- содержание мусхафа ---------- */
+.index-sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
+  animation: sheet-in 0.18s ease;
+}
+@keyframes sheet-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .index-sheet {
+    animation: none;
+  }
+}
+.index-head,
+.index-tabs,
+.index-search,
+.index-list {
+  width: 100%;
+  max-width: 640px;
+  margin-inline: auto;
+  box-sizing: border-box;
+}
+.index-head {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  padding: 14px 16px 6px;
+}
+.index-head h2 {
+  margin: 0;
+  font-size: 20px;
+}
+.index-head .icon-btn {
+  position: absolute;
+  inset-inline-end: 12px;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+}
+.index-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--line);
+  padding: 0 8px;
+}
+.index-tabs button {
+  flex: 1;
+  background: none;
+  color: var(--muted);
+  border-radius: 0;
+  padding: 12px 6px 10px;
+  font-weight: 600;
+  box-shadow: inset 0 -3px 0 transparent;
+}
+.index-tabs button.on {
+  color: var(--text);
+  box-shadow: inset 0 -3px 0 var(--accent);
+}
+.index-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 0 16px;
+  color: var(--muted);
+  position: relative;
+}
+.index-search .icon {
+  position: absolute;
+  inset-inline-start: 28px;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+.index-search input {
+  padding-inline-start: 40px;
+  border-radius: 12px;
+  background: var(--card);
+}
+.index-list {
+  flex: 1;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 12px 16px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.index-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-align: start;
+  background: var(--card);
+  color: var(--text);
+  border-radius: 12px;
+  padding: 12px 14px;
+  font-weight: 400;
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.index-row.here {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+.index-num {
+  flex: none;
+  min-width: 2ch;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  font-weight: 600;
+  text-align: center;
+}
+.index-name {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.index-name b {
+  font-weight: 600;
+}
+.index-name small {
+  color: var(--muted);
+  font-size: 13px;
+}
+.index-ar {
+  flex: none;
+  font-family: "Hafs", "Scheherazade New", serif;
+  font-size: 22px;
+  line-height: 1.2;
+}
+.index-page {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding-top: 8px;
+}
+.index-page-num {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+.index-page-num input {
+  width: 120px;
+  text-align: center;
+  font-size: 28px;
+  font-weight: 700;
+}
+.index-range {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  accent-color: var(--accent);
+  direction: rtl; /* как в мусхафе: первая страница справа */
+}
+.index-range-ends {
+  display: flex;
+  flex-direction: row-reverse;
+  justify-content: space-between;
+  color: var(--muted);
+  font-size: 13px;
+  margin-top: -8px;
 }
 
 .onboarding h1 {
