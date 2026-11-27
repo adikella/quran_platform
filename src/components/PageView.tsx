@@ -23,13 +23,15 @@ interface Props {
   bookmark?: { on: boolean; toggle: () => void };
   /** Сколько первых слов строки после активных учить заодно, чтобы связать с завтрашним уроком. */
   bridge?: number;
+  /** Вся страница на экран без прокрутки, как в мусхафе: 15 рядов, высота ряда по высоте экрана. */
+  fill?: boolean;
 }
 
 /**
  * Подбирает размер шрифта так, чтобы самая длинная строка помещалась по ширине:
  * строки мусхафа нельзя переносить, иначе номера строк перестанут совпадать с бумажным мусхафом.
  */
-function useFitLines(key: string) {
+function useFitLines(key: string, fill = false) {
   const ref = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const el = ref.current;
@@ -64,6 +66,7 @@ function useFitLines(key: string) {
       } else {
         el.style.fontSize = "";
       }
+      if (fill && ratio > 0) fitHeight(el, lines.length);
     };
     const schedule = () => {
       cancelAnimationFrame(frame);
@@ -80,12 +83,48 @@ function useFitLines(key: string) {
       }
     });
     ro.observe(el);
+    // Высота экрана меняется отдельно от ширины (поворот, панель Телеграма).
+    let height = window.innerHeight;
+    const onResize = () => {
+      if (fill && window.innerHeight !== height) {
+        height = window.innerHeight;
+        schedule();
+      }
+    };
+    window.addEventListener("resize", onResize);
     return () => {
       ro.disconnect();
+      window.removeEventListener("resize", onResize);
       cancelAnimationFrame(frame);
     };
-  }, [key]);
+  }, [key, fill]);
   return ref;
+}
+
+/** Самый просторный ряд и самый тесный, в долях размера шрифта. */
+const ROW_MAX = 2.3;
+const ROW_MIN = 1.62;
+
+/**
+ * Ряд страницы (строка текста, название суры или басмала) одной высоты, как в бумажном мусхафе:
+ * у мединского их всегда 15. Высоту ряда берём так, чтобы страница встала на экран целиком;
+ * если и при тесных рядах не влезает, уменьшаем шрифт.
+ */
+function fitHeight(el: HTMLElement, textLines: number) {
+  const rows = textLines + el.querySelectorAll(".surah-title, .basmala").length;
+  const font = parseFloat(el.style.fontSize) || 20;
+  const cs = getComputedStyle(el);
+  const head = el.querySelector<HTMLElement>(".page-head")?.offsetHeight ?? 0;
+  const tabs = document.querySelector<HTMLElement>(".tabs")?.offsetHeight ?? 0;
+  const top = el.getBoundingClientRect().top + window.scrollY;
+  const free = window.innerHeight - tabs - top - head - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom) - 6;
+  let row = Math.min(font * ROW_MAX, free / rows);
+  if (row < font * ROW_MIN) {
+    el.style.fontSize = `${Math.floor((row / ROW_MIN) * 10) / 10}px`;
+    row = Math.max(row, 18);
+  }
+  el.style.setProperty("--row", `${Math.floor(row * 10) / 10}px`);
+  el.classList.add("rows");
 }
 
 const BASE = import.meta.env.BASE_URL;
@@ -120,13 +159,13 @@ function useQcfFont(page: number, needed: boolean) {
 
 const BASMALA = "بِسۡمِ ٱللَّهِ ٱلرَّحۡمَٰنِ ٱلرَّحِيمِ";
 
-export function PageView({ mushaf, page, surahs, active, hidden, peek, onlyActive, marks, onWord, bookmark, bridge }: Props) {
+export function PageView({ mushaf, page, surahs, active, hidden, peek, onlyActive, marks, onWord, bookmark, bridge, fill }: Props) {
   const t = useT();
   const starts = surahStarts(page);
   const glyphs = mushaf === "madani" && page.l.every((l) => l.c);
   const qcfReady = useQcfFont(page.p, glyphs);
   const useGlyphs = glyphs && qcfReady;
-  const ref = useFitLines([page.p, mushaf, onlyActive, active?.[0], active?.[1], useGlyphs].join("|"));
+  const ref = useFitLines([page.p, mushaf, onlyActive, active?.[0], active?.[1], useGlyphs].join("|"), fill);
   const surahNo = Number(page.v[0].split(":")[0]);
   const showHead = !active && !onlyActive;
   return (

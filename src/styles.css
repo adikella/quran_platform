@@ -459,6 +459,24 @@ label.check-row input {
 .screen-mushaf .page-madani {
   line-height: 2.3;
 }
+/* Ряды одной высоты (--row считает PageView): страница встаёт на экран целиком. */
+.page.rows .line {
+  height: var(--row);
+  line-height: var(--row);
+}
+.page.rows .surah-head {
+  margin: 0;
+}
+.page.rows .basmala {
+  height: var(--row);
+  line-height: var(--row);
+}
+.page.rows .surah-title {
+  box-sizing: border-box;
+  height: calc(var(--row) - 6px);
+  line-height: calc(var(--row) - 9px);
+  margin: 3px 0;
+}
 .screen.screen-spread {
   max-width: 1360px;
 }

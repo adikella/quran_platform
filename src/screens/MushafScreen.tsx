@@ -65,7 +65,7 @@ export function MushafScreen({ mushaf, page, setPage }: { mushaf: MushafId; page
       {open && meta && (
         <MushafIndex meta={meta} surahs={surahs} lang={lang} page={page} onPick={setPage} onClose={() => setOpen(false)} />
       )}
-      {info && <p className="muted center">{verseSpanLabel(info[1], info[2], surahs, lang)}</p>}
+      {wide && info && <p className="muted center">{verseSpanLabel(info[1], info[2], surahs, lang)}</p>}
       {error && <p className="muted">{t("loadError")}</p>}
       {data && (
         <div className="spread">
@@ -75,6 +75,7 @@ export function MushafScreen({ mushaf, page, setPage }: { mushaf: MushafId; page
               mushaf={mushaf}
               page={pd}
               surahs={surahs}
+              fill={!wide}
               bookmark={
                 student
                   ? {
