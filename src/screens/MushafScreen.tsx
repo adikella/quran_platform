@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { PageView } from "../components/PageView";
 import { activeStudent, setBookmark, useAppState } from "../store";
 import { useMeta, usePages, useSurahs, useT } from "../hooks";
@@ -37,13 +37,40 @@ export function MushafScreen({ mushaf, page, setPage }: { mushaf: MushafId; page
   const info = meta?.page[page - 1];
 
   const [open, setOpen] = useState(false);
+  const next = () => right + step <= pages && setPage(right + step);
+  const prev = () => right > 1 && setPage(Math.max(1, right - step));
+  // Свайп как в бумажном мусхафе: палец вправо открывает следующую страницу, влево предыдущую.
+  const touch = useRef<{ x: number; y: number; t: number } | null>(null);
+  const [turn, setTurn] = useState<"next" | "prev" | null>(null);
+  const swipe = {
+    onTouchStart: (e: React.TouchEvent) => {
+      const p = e.touches[0];
+      touch.current = e.touches.length === 1 ? { x: p.clientX, y: p.clientY, t: Date.now() } : null;
+    },
+    onTouchEnd: (e: React.TouchEvent) => {
+      const s0 = touch.current;
+      touch.current = null;
+      if (!s0) return;
+      const p = e.changedTouches[0];
+      const dx = p.clientX - s0.x;
+      const dy = p.clientY - s0.y;
+      if (Math.abs(dx) < 50 || Math.abs(dx) < Math.abs(dy) * 1.5 || Date.now() - s0.t > 800) return;
+      if (dx > 0 && right + step <= pages) {
+        setTurn("next");
+        next();
+      } else if (dx < 0 && right > 1) {
+        setTurn("prev");
+        prev();
+      }
+    },
+  };
 
   return (
     <div className={`screen ${wide ? "screen-spread" : "screen-mushaf"}`}>
       <div className="mushaf-nav">
         <button
           className="ghost small icon-btn"
-          onClick={() => setPage(Math.min(pages, right + step))}
+          onClick={next}
           disabled={right + step > pages}
           aria-label={t("idx_next")}
         >
@@ -58,7 +85,7 @@ export function MushafScreen({ mushaf, page, setPage }: { mushaf: MushafId; page
             </small>
           </span>
         </button>
-        <button className="ghost small icon-btn" onClick={() => setPage(Math.max(1, right - step))} disabled={right <= 1} aria-label={t("idx_prev")}>
+        <button className="ghost small icon-btn" onClick={prev} disabled={right <= 1} aria-label={t("idx_prev")}>
           <Icon name="forward" size={20} />
         </button>
       </div>
@@ -68,7 +95,7 @@ export function MushafScreen({ mushaf, page, setPage }: { mushaf: MushafId; page
       {wide && info && <p className="muted center">{verseSpanLabel(info[1], info[2], surahs, lang)}</p>}
       {error && <p className="muted">{t("loadError")}</p>}
       {data && (
-        <div className="spread">
+        <div className={`spread ${turn ? `turn-${turn}` : ""}`} key={right} {...swipe} onAnimationEnd={() => setTurn(null)}>
           {data.map((pd) => (
             <PageView
               key={pd.p}

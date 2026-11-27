@@ -439,10 +439,38 @@ label.check-row input {
   align-items: flex-start;
   justify-content: center;
 }
+/* Перелистывание свайпом: следующая страница приходит слева, предыдущая справа, как в мусхафе. */
+.spread.turn-next {
+  animation: turn-next 0.22s ease-out;
+}
+.spread.turn-prev {
+  animation: turn-prev 0.22s ease-out;
+}
+@keyframes turn-next {
+  from {
+    opacity: 0.3;
+    transform: translateX(-28%);
+  }
+}
+@keyframes turn-prev {
+  from {
+    opacity: 0.3;
+    transform: translateX(28%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .spread.turn-next,
+  .spread.turn-prev {
+    animation: none;
+  }
+}
 .spread > .page {
   flex: 1 1 0;
 }
 /* Мусхаф на телефоне: страница во всю ширину и строки свободнее, как в приложении Комплекса короля Фахда. */
+.screen-mushaf {
+  overflow-x: clip;
+}
 .screen-mushaf .spread {
   margin-inline: -16px;
 }
