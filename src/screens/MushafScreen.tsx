@@ -48,7 +48,7 @@ export function MushafScreen({ mushaf, page, setPage }: { mushaf: MushafId; page
   const next = () => right + step <= pages && setPage(right + step);
   const prev = () => right > 1 && setPage(Math.max(1, right - step));
   // Свайп как в бумажном мусхафе: палец вправо открывает следующую страницу, влево предыдущую.
-  const touch = useRef<{ x: number; y: number; t: number } | null>(null);
+  const touch = useRef<{ x: number; y: number; t: number; top: boolean } | null>(null);
   const [turn, setTurn] = useState<"next" | "prev" | null>(null);
   const turnTo = (dir: "next" | "prev") => {
     if (dir === "next" ? right + step > pages : right <= 1) return;
@@ -100,7 +100,7 @@ export function MushafScreen({ mushaf, page, setPage }: { mushaf: MushafId; page
   const swipe = {
     onTouchStart: (e: React.TouchEvent) => {
       const p = e.touches[0];
-      touch.current = e.touches.length === 1 ? { x: p.clientX, y: p.clientY, t: Date.now() } : null;
+      touch.current = e.touches.length === 1 ? { x: p.clientX, y: p.clientY, t: Date.now(), top: window.scrollY <= 0 } : null;
     },
     onTouchEnd: (e: React.TouchEvent) => {
       const s0 = touch.current;
@@ -109,7 +109,15 @@ export function MushafScreen({ mushaf, page, setPage }: { mushaf: MushafId; page
       const p = e.changedTouches[0];
       const dx = p.clientX - s0.x;
       const dy = p.clientY - s0.y;
-      if (Math.abs(dx) < 50 || Math.abs(dx) < Math.abs(dy) * 1.5 || Date.now() - s0.t > 800) return;
+      if (Date.now() - s0.t > 800) return;
+      // Потянул страницу вниз: меню уходит, страница на весь экран. Вверх: меню возвращается.
+      if (!wide && Math.abs(dy) >= 50 && Math.abs(dy) > Math.abs(dx) * 1.5) {
+        // Только от верха страницы: иначе это обычная прокрутка обратно вверх.
+        if (s0.top && dy > 0) setReading(true);
+        else if (s0.top && dy < 0) setReading(false);
+        return;
+      }
+      if (Math.abs(dx) < 50 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
       turnTo(dx > 0 ? "next" : "prev");
     },
   };

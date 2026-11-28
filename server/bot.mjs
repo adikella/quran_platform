@@ -54,7 +54,8 @@ async function call(method, body) {
   return json.result;
 }
 
-const button = (url) => ({ inline_keyboard: [[{ text: "Открыть", web_app: { url } }]] });
+// «Открыть»: приложение внутри Telegram; «На сайте»: то же в браузере телефона (значок на экране, без Telegram).
+const button = (url) => ({ inline_keyboard: [[{ text: "Открыть", web_app: { url } }, { text: "На сайте", url }]] });
 const send = (chat_id, text, url = APP_URL) => call("sendMessage", { chat_id, text, reply_markup: button(url) });
 
 // ---------- вход на сайте ----------

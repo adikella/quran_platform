@@ -369,7 +369,8 @@ def notify(tg_id: int | None, text: str):
         return
     body = {
         "chat_id": tg_id, "text": text,
-        "reply_markup": {"inline_keyboard": [[{"text": "Открыть", "web_app": {"url": APP_URL}}]]},
+        # «Открыть»: приложение внутри Telegram; «На сайте»: то же в браузере телефона (значок на экране, без Telegram).
+        "reply_markup": {"inline_keyboard": [[{"text": "Открыть", "web_app": {"url": APP_URL}}, {"text": "На сайте", "url": APP_URL}]]},
     }
     threading.Thread(target=bot_call, args=("sendMessage", body), daemon=True).start()
 
