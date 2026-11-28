@@ -1,6 +1,7 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { useT } from "../hooks";
 import { arabicDigits, surahStarts } from "../mushaf";
+import { AyahMark, SurahFrame } from "./Ornaments";
 import type { MushafId, PageData, Surah } from "../types";
 
 export type WordMark = 1 | 2; // 1 — ошибка, 2 — замечание по таджвиду
@@ -180,6 +181,32 @@ function usePageFonts(fonts: { family: string; url: string }[]) {
   return ready;
 }
 
+/**
+ * Рамка с названием суры и басмала глифами издания 1441 года (шрифты QBSML и Hafs_01): название суры
+ * в QBSML стоит по номеру суры, басмала почти у всех сур одна. Для 1421 года берём те же: текст тот же.
+ */
+function headGlyphs(surah: number): [string, string] {
+  const name = String.fromCodePoint(0xf100 + surah - 1);
+  if (surah === 1 || surah === 9) return [name, ""];
+  return [name, surah === 2 ? "\uF8DD" : surah === 95 || surah === 97 ? "\uF8D7" : "\uF8D6"];
+}
+
+/** Знак конца аята держится за последнее слово аята: растяжка строки не отодвигает его. */
+function groupEnds(items: ReactNode[], words: (string | number)[]): ReactNode[] {
+  const out: ReactNode[] = [];
+  items.forEach((item, i) => {
+    if (typeof words[i] === "number" && i > 0 && typeof words[i - 1] !== "number" && out.length) {
+      out[out.length - 1] = (
+        <span key={`g${i}`} className="w-end">
+          {out[out.length - 1]}
+          {item}
+        </span>
+      );
+    } else out.push(item);
+  });
+  return out;
+}
+
 const BASMALA = "بِسۡمِ ٱللَّهِ ٱلرَّحۡمَٰنِ ٱلرَّحِيمِ";
 
 export function PageView({ mushaf, page, surahs, active, hidden, peek, onlyActive, marks, onWord, bookmark, bridge, fill }: Props) {
@@ -187,7 +214,7 @@ export function PageView({ mushaf, page, surahs, active, hidden, peek, onlyActiv
   const starts = surahStarts(page);
   const font = page.l.every((l) => l.c) ? glyphFont(mushaf, page) : null;
   // Рамки с названием суры и басмала в 1441 году тоже глифами: свой шрифт для рамок и шрифт первой страницы.
-  const heads = mushaf === "madani1441" && page.hd && Object.keys(page.hd).length > 0;
+  const heads = starts.length > 0;
   const fonts = font ? [font, ...(heads ? [{ family: "QCF4_QBSML", url: `${QCF4}/QCF4_QBSML.woff2` }, { family: "QCF4_Hafs_01", url: `${QCF4}/QCF4_Hafs_01_W.woff2` }] : [])] : [];
   const useGlyphs = usePageFonts(fonts) && !!font;
   const ref = useFitLines([page.p, mushaf, onlyActive, active?.[0], active?.[1], useGlyphs].join("|"), fill);
@@ -265,10 +292,12 @@ export function PageView({ mushaf, page, surahs, active, hidden, peek, onlyActiv
           <div key={line.n}>
             {start && (
               <div className={`surah-head ${inActive && !isBridge ? "" : "dim"}`}>
-                {useGlyphs && page.hd?.[start.surah] ? (
+                {useGlyphs ? (
                   <>
-                    <div className="surah-frame">{page.hd[start.surah][0]}</div>
-                    {page.hd[start.surah][1] && <div className="basmala basmala-glyph">{page.hd[start.surah][1]}</div>}
+                    <SurahFrame>{(page.hd?.[start.surah] ?? headGlyphs(start.surah))[0]}</SurahFrame>
+                    {(page.hd?.[start.surah] ?? headGlyphs(start.surah))[1] && (
+                      <div className="basmala basmala-glyph">{(page.hd?.[start.surah] ?? headGlyphs(start.surah))[1]}</div>
+                    )}
                   </>
                 ) : (
                   <>
@@ -282,14 +311,14 @@ export function PageView({ mushaf, page, surahs, active, hidden, peek, onlyActiv
               className={`line ${wide ? "wide" : "narrow"} ${inActive ? "on" : "dim"} ${covered ? "covered" : ""}`}
               data-line={li + 1}
             >
-              {line.w.map((w, wi) => {
+              {groupEnds(line.w.map((w, wi) => {
                 const key = `${page.p}:${li}:${wi}`;
                 const text = useGlyphs ? (line.c![wi] ?? "") : typeof w === "number" ? "۝" + arabicDigits(w) : w;
                 const off = wi >= bridgeEnd ? " off" : "";
                 if (typeof w === "number") {
                   return (
                     <span key={wi} className={`ayah-end${off}`}>
-                      {text}
+                      {useGlyphs ? <AyahMark n={w} /> : text}
                     </span>
                   );
                 }
@@ -303,7 +332,7 @@ export function PageView({ mushaf, page, surahs, active, hidden, peek, onlyActiv
                     {text}
                   </span>
                 );
-              })}
+              }), line.w)}
             </div>
           </div>
         );

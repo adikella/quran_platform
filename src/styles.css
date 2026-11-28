@@ -573,14 +573,63 @@ label.check-row input {
 }
 /* Мединский 1441: рамка с названием суры и басмала глифами издания. */
 .surah-frame {
+  display: flex;
+  align-items: stretch;
   font-family: "QCF4_QBSML";
   font-size: 1.15em;
   line-height: 1.3;
   color: var(--page-ink);
   white-space: nowrap;
-  overflow: hidden;
-  border: 1.5px solid color-mix(in srgb, var(--page-accent) 70%, transparent);
-  border-radius: 10px;
+}
+.orn-end {
+  flex: none;
+  height: 100%;
+  width: auto;
+  display: block;
+}
+.orn-mid {
+  flex: 1;
+  min-width: 0;
+  margin-inline: -1px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-size: 100% 100%;
+}
+.surah-frame .surah-name {
+  color: #0a0a0a;
+  white-space: nowrap;
+  font-size: 0.95em;
+  line-height: 1;
+}
+/* Знак конца аята: розетка картинкой, номер поверх. */
+.ayah-mark {
+  display: inline-grid;
+  place-items: center;
+  height: 1.5em;
+  width: 1.21em;
+  margin-bottom: -0.14em;
+  vertical-align: -0.14em;
+  background: center / contain no-repeat;
+}
+.ayah-num {
+  font-family: "Hafs", serif;
+  font-size: 1em;
+  line-height: 1;
+  color: #0a0a0a;
+  -webkit-text-stroke: 0.03em currentColor;
+  transform: translateY(0.02em);
+}
+.ayah-mark.n2 .ayah-num {
+  font-size: 0.82em;
+}
+.ayah-mark.n3 .ayah-num {
+  font-size: 0.64em;
+}
+/* Слово и знак конца аята одним куском. */
+.w-end {
+  display: inline-flex;
+  align-items: baseline;
 }
 .page .basmala.basmala-glyph {
   font-family: "QCF4_Hafs_01";
