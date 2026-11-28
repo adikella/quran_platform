@@ -477,7 +477,8 @@ label.check-row input {
 .screen-mushaf .page {
   border-radius: 0;
   border-inline: 0;
-  padding: 12px 8px;
+  /* Поля по краям, как в печатном мусхафе и в приложении Комплекса: текст не упирается в край экрана. */
+  padding: 12px 16px;
 }
 .screen-mushaf .page-madani {
   line-height: 2.3;
