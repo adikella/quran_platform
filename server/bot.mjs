@@ -87,7 +87,7 @@ async function askLogin(chat, start) {
   return call("sendMessage", {
     chat_id: chat,
     text:
-      `Вход на сайт «Устаз-помощник». На сайте должно быть число ${login.number}.\n\n` +
+      `Вход на сайт «Madrasa». На сайте должно быть число ${login.number}.\n\n` +
       "Это вы входите? Если ссылку вам кто-то прислал, нажмите «Нет»: иначе он войдёт вместо вас.",
     reply_markup: {
       inline_keyboard: [[

@@ -1,7 +1,7 @@
 import type { Lang } from "./types";
 
 const ru = {
-  appName: "Устаз-помощник",
+  appName: "Madrasa",
   tab_today: "Сегодня",
   tab_mushaf: "Мусхаф",
   tab_journal: "Дневник",
@@ -434,7 +434,7 @@ const ru = {
 type Dict = typeof ru;
 
 const kk: Dict = {
-  appName: "Ұстаз-көмекші",
+  appName: "Madrasa",
   tab_today: "Бүгін",
   tab_mushaf: "Мұсхаф",
   tab_journal: "Күнделік",
@@ -865,7 +865,7 @@ const kk: Dict = {
 };
 
 const en: Dict = {
-  appName: "Ustaz Assistant",
+  appName: "Madrasa",
   tab_today: "Today",
   tab_mushaf: "Mushaf",
   tab_journal: "Journal",
@@ -1296,7 +1296,7 @@ const en: Dict = {
 };
 
 const ar: Dict = {
-  appName: "مساعد الأستاذ",
+  appName: "Madrasa",
   tab_today: "اليوم",
   tab_mushaf: "المصحف",
   tab_journal: "الدفتر",

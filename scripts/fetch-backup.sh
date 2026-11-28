@@ -25,7 +25,7 @@ fi
 # Копии нет больше двух дней: сказать об этом на экране.
 age=$(( ($(date +%s) - $(stat -f %m "$DIR/${newest:-.}")) / 3600 ))
 if [ -z "$newest" ] || [ $age -gt 48 ]; then
-  osascript -e 'display notification "Копия базы не обновлялась больше двух дней. Напиши Claude." with title "Устаз-помощник"' || true
+  osascript -e 'display notification "Копия базы не обновлялась больше двух дней. Напиши Claude." with title "Madrasa"' || true
 fi
 echo "$(date '+%Y-%m-%d %H:%M') ok=$([ $ok = 0 ] && echo да || echo нет) последняя: ${newest:-нет}, часов назад: $age"
 exit $ok
