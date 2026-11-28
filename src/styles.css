@@ -392,7 +392,12 @@ label.check-row input {
   transition: opacity 0.15s, filter 0.15s;
 }
 .qcf .line {
-  gap: 0.22em;
+  gap: 0.06em;
+}
+/* Глифы QCF тонковаты на экране телефона: чуть-чуть обводки того же цвета, не жирный. */
+.qcf .line .w,
+.qcf .line .ayah-end {
+  -webkit-text-stroke: 0.022em currentColor;
 }
 .qcf .surah-title,
 .qcf .basmala {
