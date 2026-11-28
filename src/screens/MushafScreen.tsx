@@ -50,6 +50,53 @@ export function MushafScreen({ mushaf, page, setPage }: { mushaf: MushafId; page
   // Свайп как в бумажном мусхафе: палец вправо открывает следующую страницу, влево предыдущую.
   const touch = useRef<{ x: number; y: number; t: number } | null>(null);
   const [turn, setTurn] = useState<"next" | "prev" | null>(null);
+  const turnTo = (dir: "next" | "prev") => {
+    if (dir === "next" ? right + step > pages : right <= 1) return;
+    setTurn(dir);
+    if (dir === "next") next();
+    else prev();
+  };
+  // Свежая функция для слушателей, которые вешаются один раз.
+  const turnRef = useRef(turnTo);
+  turnRef.current = turnTo;
+  const blocked = open || study !== null;
+
+  // Тачпад (два пальца вбок) и стрелки клавиатуры, как свайп: вправо вперёд, влево назад.
+  useEffect(() => {
+    if (blocked) return;
+    let sum = 0;
+    let quietUntil = 0;
+    let reset = 0;
+    const onWheel = (e: WheelEvent) => {
+      if (Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return;
+      // Иначе браузер уйдёт назад по истории.
+      e.preventDefault();
+      const now = Date.now();
+      if (now < quietUntil) return;
+      sum += e.deltaX;
+      clearTimeout(reset);
+      reset = window.setTimeout(() => (sum = 0), 200);
+      if (Math.abs(sum) > 60) {
+        // Пальцы вправо дают отрицательный сдвиг: это следующая страница.
+        turnRef.current(sum < 0 ? "next" : "prev");
+        sum = 0;
+        quietUntil = now + 700;
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.target as HTMLElement)?.closest?.("input, textarea, select")) return;
+      // В мусхафе следующая страница слева.
+      if (e.key === "ArrowLeft") turnRef.current("next");
+      if (e.key === "ArrowRight") turnRef.current("prev");
+    };
+    window.addEventListener("wheel", onWheel, { passive: false });
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("wheel", onWheel);
+      window.removeEventListener("keydown", onKey);
+      clearTimeout(reset);
+    };
+  }, [blocked]);
   const swipe = {
     onTouchStart: (e: React.TouchEvent) => {
       const p = e.touches[0];
@@ -63,13 +110,7 @@ export function MushafScreen({ mushaf, page, setPage }: { mushaf: MushafId; page
       const dx = p.clientX - s0.x;
       const dy = p.clientY - s0.y;
       if (Math.abs(dx) < 50 || Math.abs(dx) < Math.abs(dy) * 1.5 || Date.now() - s0.t > 800) return;
-      if (dx > 0 && right + step <= pages) {
-        setTurn("next");
-        next();
-      } else if (dx < 0 && right > 1) {
-        setTurn("prev");
-        prev();
-      }
+      turnTo(dx > 0 ? "next" : "prev");
     },
   };
 

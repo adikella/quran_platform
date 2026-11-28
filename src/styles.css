@@ -1741,3 +1741,8 @@ body.reading .screen-mushaf {
 body.reading .app {
   padding-bottom: env(safe-area-inset-bottom);
 }
+/* Свайп тачпадом листает мусхаф, а не уводит браузер назад по истории. */
+html:has(.screen-mushaf),
+html:has(.screen-spread) {
+  overscroll-behavior-x: none;
+}
