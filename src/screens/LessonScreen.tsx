@@ -2,12 +2,13 @@ import { Icon } from "../icons";
 import { useEffect, useMemo, useState } from "react";
 import { Counter } from "../components/Counter";
 import { PageView } from "../components/PageView";
+import { LessonTajweed } from "../components/StudySheet";
 import { useMeta, usePages, useSessionTimer, useSurahs, useT } from "../hooks";
 import type { Key } from "../i18n";
 import { BRIDGE_WORDS, buildSteps, previousLesson } from "../method";
 import { learnedOf } from "../learned";
 import { versesOfRange } from "../mushaf";
-import { abandonLesson, addRep, addTime, finishLesson, patchStudent, setLessonProgress } from "../store";
+import { abandonLesson, addRep, addTime, finishLesson, patchStudent, setLessonProgress, useAppState } from "../store";
 import { haptic } from "../telegram";
 import type { Step, Student } from "../types";
 
@@ -42,6 +43,7 @@ interface Props {
 export function LessonScreen({ student, onClose, onSubmitNow }: Props) {
   const t = useT();
   const surahs = useSurahs();
+  const { lang } = useAppState();
   const lesson = student.hifz.lesson;
   const lp = lesson?.range.page ?? 0;
   const oneChunk = student.volume !== "lines2";
@@ -121,6 +123,10 @@ export function LessonScreen({ student, onClose, onSubmitNow }: Props) {
     else onClose();
   };
 
+  // Аяты урока: от первого до последнего, по ключам страницы.
+  const [vFrom, vTo] = versesOfRange(page, lesson.range.from, lesson.range.to);
+  const lessonVerses = page.v.slice(page.v.indexOf(vFrom), page.v.indexOf(vTo) + 1);
+
   return (
     <div className="screen lesson">
       <header className="bar-top">
@@ -181,6 +187,8 @@ export function LessonScreen({ student, onClose, onSubmitNow }: Props) {
         onLimit={(m) => patchStudent(student.id, { method: { ...student.method, sessionMinutes: m } })}
         daily={daily}
       />
+
+      <LessonTajweed page={page.p} verses={lessonVerses} surahs={surahs} lang={lang} />
 
       <div className="row">
         <button className="ghost" onClick={() => goStep(stepIdx - 1)} disabled={stepIdx === 0}>

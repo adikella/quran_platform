@@ -5,6 +5,7 @@ import { useMeta, usePages, useSurahs, useT } from "../hooks";
 import { pageSurahs, surahName, verseSpanLabel } from "../mushaf";
 import { Icon } from "../icons";
 import { MushafIndex } from "../components/MushafIndex";
+import { StudySheet } from "../components/StudySheet";
 import type { MushafId } from "../types";
 
 /** На широком экране мусхаф открывается разворотом: нечётная страница справа, следующая слева. */
@@ -37,6 +38,7 @@ export function MushafScreen({ mushaf, page, setPage }: { mushaf: MushafId; page
   const info = meta?.page[page - 1];
 
   const [open, setOpen] = useState(false);
+  const [study, setStudy] = useState<number | null>(null);
   const next = () => right + step <= pages && setPage(right + step);
   const prev = () => right > 1 && setPage(Math.max(1, right - step));
   // Свайп как в бумажном мусхафе: палец вправо открывает следующую страницу, влево предыдущую.
@@ -114,6 +116,25 @@ export function MushafScreen({ mushaf, page, setPage }: { mushaf: MushafId; page
             />
           ))}
         </div>
+      )}
+      {data && (
+        <div className="study-open">
+          {data.map((pd) => (
+            <button key={pd.p} className="ghost wide" onClick={() => setStudy(pd.p)}>
+              {t("st_open")}
+              {data.length > 1 ? `, ${t("page").toLowerCase()} ${pd.p}` : ""}
+            </button>
+          ))}
+        </div>
+      )}
+      {study !== null && data && (
+        <StudySheet
+          page={study}
+          verses={data.find((pd) => pd.p === study)?.v ?? []}
+          surahs={surahs}
+          lang={lang}
+          onClose={() => setStudy(null)}
+        />
       )}
     </div>
   );

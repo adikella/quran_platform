@@ -1635,3 +1635,95 @@ button.link.inline {
   margin: 0;
   font-size: 14px;
 }
+
+/* Пояснения к странице: тафсир, таджвид, кырааты из API «Суры». */
+.study-open {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.study-tabs {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 10px 16px 8px;
+  width: 100%;
+  max-width: 640px;
+  margin-inline: auto;
+  box-sizing: border-box;
+  scrollbar-width: none;
+}
+.study-tabs .chip {
+  flex: none;
+}
+.study-about {
+  margin: 0;
+  font-size: 13px;
+}
+.study-note {
+  background: var(--card);
+  border-radius: 12px;
+  padding: 12px 14px;
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.study-note h3 {
+  margin: 0 0 6px;
+  font-size: 14px;
+  color: var(--muted);
+  font-weight: 600;
+}
+/* Пояснения обычным арабским шрифтом телефона: шрифт мусхафа рисует запятые как знаки остановки. */
+.study-text {
+  font-family: "Geeza Pro", "Noto Naskh Arabic", "Noto Sans Arabic", "Segoe UI", Tahoma, sans-serif;
+  font-size: 17px;
+  line-height: 1.8;
+}
+.study-text .quote {
+  font-family: "Hafs", serif;
+  font-size: 1.1em;
+}
+.study-text p {
+  margin: 0 0 6px;
+}
+.study-text .quote {
+  quotes: "﴿" "﴾";
+  color: var(--accent);
+}
+.study-text em {
+  font-style: normal;
+  color: var(--accent);
+}
+.study-text small {
+  font-size: 0.8em;
+}
+.study-sub {
+  color: var(--muted);
+  font-size: 0.85em;
+}
+.study-source {
+  font-size: 12px;
+  margin: 4px 0 0;
+}
+.lesson-tajweed {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.lesson-tajweed summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--accent);
+}
+.lesson-tajweed[open] summary {
+  margin-bottom: 8px;
+}
+.lesson-tajweed .study-note + .study-note {
+  margin-top: 8px;
+}
+/* Внутри карточки урока заметки без своей рамки: карточка в карточке не нужна. */
+.lesson-tajweed .study-note {
+  background: none;
+  box-shadow: none;
+  padding: 0;
+  border-radius: 0;
+}
