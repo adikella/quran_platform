@@ -147,7 +147,7 @@ export function MushafScreen({ mushaf, page, setPage }: { mushaf: MushafId; page
         </button>
       </div>
       {open && meta && (
-        <MushafIndex meta={meta} surahs={surahs} lang={lang} page={page} onPick={setPage} onClose={() => setOpen(false)} />
+        <MushafIndex meta={meta} surahs={surahs} lang={lang} page={page} bookmark={student?.bookmark} onPick={setPage} onClose={() => setOpen(false)} />
       )}
       {wide && info && <p className="muted center">{verseSpanLabel(info[1], info[2], surahs, lang)}</p>}
       {error && <p className="muted">{t("loadError")}</p>}

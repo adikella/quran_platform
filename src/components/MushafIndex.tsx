@@ -28,6 +28,7 @@ export function MushafIndex({
   surahs,
   lang,
   page,
+  bookmark,
   onPick,
   onClose,
 }: {
@@ -35,6 +36,8 @@ export function MushafIndex({
   surahs: Surah[];
   lang: Lang;
   page: number;
+  /** Страница с закладкой: первой строкой, чтобы перейти одним нажатием. */
+  bookmark?: number;
   onPick: (p: number) => void;
   onClose: () => void;
 }) {
@@ -88,6 +91,17 @@ export function MushafIndex({
           <Icon name="close" size={20} />
         </button>
       </header>
+
+      {bookmark && bookmark <= meta.pages && (
+        <button className="index-bookmark" onClick={() => pick(bookmark)}>
+          <Icon name="bookmark" size={20} />
+          <span className="index-name">
+            <b>{t("idx_bookmark", { p: bookmark })}</b>
+            <small>{verseSpanLabel(meta.page[bookmark - 1][1], meta.page[bookmark - 1][2], surahs, lang)}</small>
+          </span>
+          <Icon name="forward" size={18} />
+        </button>
+      )}
 
       <div className="index-tabs" role="tablist">
         {(["surah", "juz", "page"] as const).map((k) => (

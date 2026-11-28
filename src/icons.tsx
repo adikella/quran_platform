@@ -13,6 +13,7 @@ const PATHS = {
   search: "M10.5 4a6.5 6.5 0 1 1 0 13 6.5 6.5 0 0 1 0-13zM15.4 15.4 20 20",
   close: "M6.5 6.5l11 11M17.5 6.5l-11 11",
   list: "M9 6.5h11M9 12h11M9 17.5h11M4.5 6.5h.5M4.5 12h.5M4.5 17.5h.5",
+  bookmark: "M6 3.5h12a1 1 0 0 1 1 1V21l-7-4.5L5 21V4.5a1 1 0 0 1 1-1z",
 } as const;
 
 export type IconName = keyof typeof PATHS;

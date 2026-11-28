@@ -1746,3 +1746,30 @@ html:has(.screen-mushaf),
 html:has(.screen-spread) {
   overscroll-behavior-x: none;
 }
+/* Закладка в содержании: переход одним нажатием. */
+.index-bookmark {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: calc(100% - 32px);
+  max-width: 608px;
+  margin: 4px auto 10px;
+  box-sizing: border-box;
+  text-align: start;
+  background: var(--soft);
+  color: var(--text);
+  border-radius: 12px;
+  padding: 12px 14px;
+  font-weight: 400;
+}
+.index-bookmark > .icon:first-child {
+  color: var(--accent);
+  flex: none;
+}
+.index-bookmark > .icon:last-child {
+  color: var(--muted);
+  flex: none;
+}
+[dir="rtl"] .index-bookmark > .icon:last-child {
+  transform: scaleX(-1);
+}
