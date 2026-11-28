@@ -17,7 +17,7 @@ async function getJson<T>(path: string): Promise<T> {
 export function loadMeta(m: MushafId): Promise<MushafMeta> {
   let p = metaCache.get(m);
   if (!p) {
-    p = getJson<MushafMeta>(`${m}/meta.json?v=2`);
+    p = getJson<MushafMeta>(`${m}/meta.json?v=3`);
     p.catch(() => metaCache.delete(m));
     metaCache.set(m, p);
   }
@@ -38,7 +38,7 @@ export async function loadPage(m: MushafId, page: number): Promise<PageData> {
   const key = `${m}/${c}`;
   let p = chunkCache.get(key);
   if (!p) {
-    p = getJson<PageData[]>(`${m}/p${c}.json`);
+    p = getJson<PageData[]>(`${m}/p${c}.json?v=3`);
     p.catch(() => chunkCache.delete(key));
     chunkCache.set(key, p);
   }

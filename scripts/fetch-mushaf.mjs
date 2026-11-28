@@ -64,7 +64,11 @@ async function fetchPage(mushaf, page) {
       } else if (w.char_type_name === "word") {
         // Убираем невидимые служебные символы (U+200B, U+FEFF): шрифты рисуют их квадратиками.
         const text = (w[field] ?? w.text).replace(/[\u200B\uFEFF]/g, "").trim();
-        if (text) {
+        // Бывает, что номер аята приходит словом («١٨١» на стр. 27): это конец аята.
+        if (/^[\u0660-\u0669]+$/.test(text)) {
+          line.w.push(Number(verse.verse_key.split(":")[1]));
+          if (glyphs) line.c.push(w.code_v2);
+        } else if (text) {
           line.w.push(text);
           if (glyphs) line.c.push(w.code_v2);
         }

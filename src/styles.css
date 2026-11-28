@@ -565,6 +565,27 @@ label.check-row input {
 .basmala {
   font-size: 0.95em;
 }
+/* Мединский 1441: рамка с названием суры и басмала глифами издания. */
+.surah-frame {
+  font-family: "QCF4_QBSML";
+  font-size: 1.15em;
+  line-height: 1.3;
+  color: var(--page-ink);
+  white-space: nowrap;
+  overflow: hidden;
+  border: 1.5px solid color-mix(in srgb, var(--page-accent) 70%, transparent);
+  border-radius: 10px;
+}
+.page .basmala.basmala-glyph {
+  font-family: "QCF4_Hafs_01";
+  font-size: 1em;
+}
+.page.rows .surah-frame {
+  box-sizing: border-box;
+  height: calc(var(--row) - 6px);
+  line-height: calc(var(--row) - 9px);
+  margin: 3px 0;
+}
 .page-label {
   font-size: 13px;
   color: var(--muted);
@@ -1598,4 +1619,19 @@ button.link.inline {
   -webkit-touch-callout: none;
   user-select: none;
   -webkit-user-select: none;
+}
+
+/* Выбор издания мединского мусхафа в настройках. */
+.edition {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.edition-label {
+  font-size: 14px;
+  color: var(--muted);
+}
+.edition p {
+  margin: 0;
+  font-size: 14px;
 }

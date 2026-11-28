@@ -13,7 +13,7 @@ export function Onboarding({ onDone, onCancel }: { onDone: () => void; onCancel?
   const { lang } = useAppState();
   const { account, joinCode } = useSync();
   const [name, setName] = useState(account?.name ?? "");
-  const [mushaf, setMushaf] = useState<MushafId>("madani");
+  const [mushaf, setMushaf] = useState<MushafId>("madani1441");
   const [stage, setStage] = useState<Stage>("nazira");
   const [volume, setVolume] = useState<Volume>("lines2");
   const [start, setStart] = useState<Start>(NEW_START);
@@ -122,7 +122,7 @@ export function Onboarding({ onDone, onCancel }: { onDone: () => void; onCancel?
       <section className="card">
         <h3>{t("chooseMushaf")}</h3>
         <div className="choices col">
-          {(["madani", "indopak"] as MushafId[]).map((m) => (
+          {(["madani1441", "madani", "indopak"] as MushafId[]).map((m) => (
             <button
               key={m}
               className={`choice ${mushaf === m ? "on" : ""}`}

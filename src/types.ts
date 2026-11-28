@@ -1,4 +1,5 @@
-export type MushafId = "madani" | "indopak";
+/** madani: мединский 1421 года (QCF2), madani1441: мединский 1441 года (QCF4), indopak: пакистанский. */
+export type MushafId = "madani" | "madani1441" | "indopak";
 export type Lang = "ru" | "kk" | "en" | "ar";
 export type Stage = "nazira" | "hifz";
 /** Объём урока на день: 2 строки, полстраницы или страница. */
@@ -166,6 +167,10 @@ export interface PageData {
   r?: number;
   v: string[];
   l: PageLine[];
+  /** Мединский 1441: имя шрифта страницы (QCF4_Hafs_17), один файл на 13 страниц. */
+  font?: string;
+  /** Мединский 1441: глифы рамки с названием суры и басмалы для сур, начинающихся на странице. */
+  hd?: Record<string, [string, string]>;
 }
 
 export interface MushafMeta {

@@ -111,7 +111,7 @@ const ROW_MIN = 1.62;
  * если и при тесных рядах не влезает, уменьшаем шрифт.
  */
 function fitHeight(el: HTMLElement, textLines: number) {
-  const rows = textLines + el.querySelectorAll(".surah-title, .basmala").length;
+  const rows = textLines + el.querySelectorAll(".surah-title, .surah-frame, .basmala").length;
   const font = parseFloat(el.style.fontSize) || 20;
   const cs = getComputedStyle(el);
   const head = el.querySelector<HTMLElement>(".page-head")?.offsetHeight ?? 0;
@@ -128,32 +128,52 @@ function fitHeight(el: HTMLElement, textLines: number) {
 }
 
 const BASE = import.meta.env.BASE_URL;
-const qcfLoaded = new Map<number, Promise<boolean>>();
+/**
+ * Шрифты мединского мусхафа 1441 года (QCF4). К себе не кладём: их можно использовать для показа Корана,
+ * но не распространять, поэтому берём из открытого пакета quran-qcf4 на jsDelivr, версия закреплена.
+ */
+const QCF4 = "https://cdn.jsdelivr.net/npm/quran-qcf4@1.1.0/fonts-woff2";
+const fontLoads = new Map<string, Promise<boolean>>();
 
-/** Подгружает шрифт QCF страницы (мединский мусхаф). Пока шрифт не готов, возвращает false. */
-function useQcfFont(page: number, needed: boolean) {
+function loadFont(family: string, url: string): Promise<boolean> {
+  let p = fontLoads.get(family);
+  if (!p) {
+    const face = new FontFace(family, `url(${url}) format("woff2")`, { display: "block" });
+    p = face.load().then(
+      (f) => {
+        document.fonts.add(f);
+        return true;
+      },
+      () => {
+        fontLoads.delete(family);
+        return false;
+      },
+    );
+    fontLoads.set(family, p);
+  }
+  return p;
+}
+
+/** Шрифт глифов страницы: 1421 года по файлу на страницу, 1441 года по файлу на 13 страниц. */
+function glyphFont(mushaf: MushafId, page: PageData): { family: string; url: string } | null {
+  if (mushaf === "madani") return { family: `QCF${page.p}`, url: `${BASE}fonts/qcf2/p${page.p}.woff2` };
+  if (mushaf === "madani1441" && page.font) return { family: page.font, url: `${QCF4}/${page.font}_W.woff2` };
+  return null;
+}
+
+/** Подгружает шрифты страницы. Пока не готовы, возвращает false, и страница рисуется обычным шрифтом. */
+function usePageFonts(fonts: { family: string; url: string }[]) {
+  const key = fonts.map((f) => f.family).join("|");
   const [ready, setReady] = useState(false);
   useEffect(() => {
-    if (!needed) return;
+    if (!fonts.length) return;
     let alive = true;
-    let p = qcfLoaded.get(page);
-    if (!p) {
-      const face = new FontFace(`QCF${page}`, `url(${BASE}fonts/qcf2/p${page}.woff2) format("woff2")`);
-      p = face.load().then(
-        (f) => {
-          document.fonts.add(f);
-          return true;
-        },
-        () => false,
-      );
-      qcfLoaded.set(page, p);
-    }
     setReady(false);
-    p.then((ok) => alive && setReady(ok));
+    Promise.all(fonts.map((f) => loadFont(f.family, f.url))).then((ok) => alive && setReady(ok.every(Boolean)));
     return () => {
       alive = false;
     };
-  }, [page, needed]);
+  }, [key]); // eslint-disable-line react-hooks/exhaustive-deps
   return ready;
 }
 
@@ -162,17 +182,19 @@ const BASMALA = "بِسۡمِ ٱللَّهِ ٱلرَّحۡمَٰنِ ٱلرَّ
 export function PageView({ mushaf, page, surahs, active, hidden, peek, onlyActive, marks, onWord, bookmark, bridge, fill }: Props) {
   const t = useT();
   const starts = surahStarts(page);
-  const glyphs = mushaf === "madani" && page.l.every((l) => l.c);
-  const qcfReady = useQcfFont(page.p, glyphs);
-  const useGlyphs = glyphs && qcfReady;
+  const font = page.l.every((l) => l.c) ? glyphFont(mushaf, page) : null;
+  // Рамки с названием суры и басмала в 1441 году тоже глифами: свой шрифт для рамок и шрифт первой страницы.
+  const heads = mushaf === "madani1441" && page.hd && Object.keys(page.hd).length > 0;
+  const fonts = font ? [font, ...(heads ? [{ family: "QCF4_QBSML", url: `${QCF4}/QCF4_QBSML.woff2` }, { family: "QCF4_Hafs_01", url: `${QCF4}/QCF4_Hafs_01_W.woff2` }] : [])] : [];
+  const useGlyphs = usePageFonts(fonts) && !!font;
   const ref = useFitLines([page.p, mushaf, onlyActive, active?.[0], active?.[1], useGlyphs].join("|"), fill);
   const surahNo = Number(page.v[0].split(":")[0]);
   const showHead = !active && !onlyActive;
   return (
     <div
       ref={ref}
-      className={`page page-${mushaf} ${useGlyphs ? "qcf" : ""}`}
-      style={useGlyphs ? { fontFamily: `"QCF${page.p}"` } : undefined}
+      className={`page page-${mushaf === "indopak" ? "indopak" : "madani"} ${useGlyphs ? "qcf" : ""}`}
+      style={useGlyphs && font ? { fontFamily: `"${font.family}"` } : undefined}
       dir="rtl"
       lang="ar"
     >
@@ -240,8 +262,17 @@ export function PageView({ mushaf, page, surahs, active, hidden, peek, onlyActiv
           <div key={line.n}>
             {start && (
               <div className={`surah-head ${inActive && !isBridge ? "" : "dim"}`}>
-                <div className="surah-title">سُورَةُ {surah ? surah.ar.replace(/^سورة\s*/, "") : start.surah}</div>
-                {surah?.basmala && start.surah !== 1 && start.surah !== 9 && <div className="basmala">{BASMALA}</div>}
+                {useGlyphs && page.hd?.[start.surah] ? (
+                  <>
+                    <div className="surah-frame">{page.hd[start.surah][0]}</div>
+                    {page.hd[start.surah][1] && <div className="basmala basmala-glyph">{page.hd[start.surah][1]}</div>}
+                  </>
+                ) : (
+                  <>
+                    <div className="surah-title">سُورَةُ {surah ? surah.ar.replace(/^سورة\s*/, "") : start.surah}</div>
+                    {surah?.basmala && start.surah !== 1 && start.surah !== 9 && <div className="basmala">{BASMALA}</div>}
+                  </>
+                )}
               </div>
             )}
             <div

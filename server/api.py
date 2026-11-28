@@ -47,7 +47,7 @@ LOGIN_SECONDS = 600
 POLL_SECONDS = 20
 KEEP_CHECKED = 30 * 86400
 KEEP_WAITING = 60 * 86400
-PAGES = {"madani": 604, "indopak": 610}
+PAGES = {"madani": 604, "madani1441": 604, "indopak": 610}
 # Без похожих символов: 0 и O, 1, I и L.
 ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
 AUDIO_TYPES = {"video/webm", "audio/webm", "audio/mp4", "audio/ogg", "audio/mpeg", "audio/wav", "audio/aac"}
@@ -240,7 +240,7 @@ class MethodDoc(Loose):
 class StudentDoc(Loose):
     id: Id
     name: DocName
-    mushaf: Literal["madani", "indopak"]
+    mushaf: Literal["madani", "madani1441", "indopak"]
     stage: Literal["nazira", "hifz"]
     volume: Literal["lines2", "half", "page"]
     direction: Literal[1, -1]

@@ -5,6 +5,8 @@ import { TeacherCard } from "../components/TeacherCard";
 import { LANG_NAMES, type Key } from "../i18n";
 import { useMeta, useT } from "../hooks";
 import { ManzilSettings } from "../components/ManzilSettings";
+import { EditionSwitch } from "../components/EditionSwitch";
+import { isEdition } from "../edition";
 import {
   exportJson,
   importJson,
@@ -100,9 +102,13 @@ export function SettingsScreen({ student, onAddStudent }: { student: Student; on
           {t("yourName")}
           <input value={student.name} onChange={(e) => patchStudent(student.id, { name: e.target.value })} />
         </label>
-        <p className="muted">
-          {t("chooseMushaf")}: <b>{t(student.mushaf)}</b>. {t("mushafLocked")}
-        </p>
+        {isEdition(student.mushaf) && meta ? (
+          <EditionSwitch student={student} meta={meta} />
+        ) : (
+          <p className="muted">
+            {t("chooseMushaf")}: <b>{t(student.mushaf)}</b>. {t("mushafLocked")}
+          </p>
+        )}
         <label>
           {t("stage")}
           <select value={student.stage} onChange={(e) => patchStudent(student.id, { stage: e.target.value as Stage })}>
