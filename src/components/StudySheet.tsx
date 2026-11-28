@@ -5,7 +5,7 @@ import { surahName } from "../mushaf";
 import { notes, type Note, type Topic } from "../surahapp";
 import type { Lang, Surah } from "../types";
 
-const TOPICS: Topic[] = ["fawaed", "mokhtasar", "tajweed", "qeraat", "eerab", "saadi", "fadael"];
+const TOPICS: Topic[] = ["fawaed", "mokhtasar", "tajweed", "nozool", "qeraat", "eerab", "saadi", "fadael"];
 
 /** Разметка текстов «Суры»: {аят} цитата, _слово_ пояснение, *заголовок*, ¬сноска¥, @чтецы/как читают. */
 export function richText(text: string): ReactNode[] {

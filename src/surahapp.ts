@@ -4,7 +4,7 @@
 
 const API = "https://dev.surahapp.com/api/v1";
 
-export type Topic = "fawaed" | "mokhtasar" | "tajweed" | "qeraat" | "eerab" | "saadi" | "fadael";
+export type Topic = "fawaed" | "mokhtasar" | "tajweed" | "nozool" | "qeraat" | "eerab" | "saadi" | "fadael";
 
 /** Отрывок для показа: к какому аяту (или слову) и текст. */
 export interface Note {
@@ -101,6 +101,18 @@ export async function notes(topic: Topic, page: number, verses: string[]): Promi
       .flat()
       .filter((w) => !/^لا خلاف بين القراء في هذا الموضع\s*(\n---\{عند الوصل\}---\nلا خلاف بين القراء في هذا الموضع)?\s*$/.test(w.content.trim()))
       .map((w) => ({ sura: w.sura_number, aya: w.aya_number, word: w.word, text: w.content }));
+  }
+  if (topic === "nozool") {
+    // Причины ниспослания есть не у каждого аята, а запрос на несколько аятов падает, если у первого её нет:
+    // спрашиваем по аяту.
+    const rows = await Promise.all(
+      runs.flatMap(([s, a, b]) =>
+        Array.from({ length: b - a + 1 }, (_, i) => get<AyaRow>(`/aya/ayat-nozool/${s}/${a + i}`).catch(() => null)),
+      ),
+    );
+    return mergeSame(
+      rows.filter((r): r is AyaRow => !!r?.content).map((r) => ({ sura: r.sura_number, aya: r.aya_number, text: r.content })),
+    );
   }
   const slug = AYA_SLUG[topic]!;
   const rows = await Promise.all(
