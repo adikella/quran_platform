@@ -39,6 +39,12 @@ export function MushafScreen({ mushaf, page, setPage }: { mushaf: MushafId; page
 
   const [open, setOpen] = useState(false);
   const [study, setStudy] = useState<number | null>(null);
+  // Режим чтения: нажатие на страницу прячет кнопки и нижнее меню, страница занимает весь экран.
+  const [reading, setReading] = useState(false);
+  useEffect(() => {
+    document.body.classList.toggle("reading", reading);
+    return () => document.body.classList.remove("reading");
+  }, [reading]);
   const next = () => right + step <= pages && setPage(right + step);
   const prev = () => right > 1 && setPage(Math.max(1, right - step));
   // Свайп как в бумажном мусхафе: палец вправо открывает следующую страницу, влево предыдущую.
@@ -97,14 +103,14 @@ export function MushafScreen({ mushaf, page, setPage }: { mushaf: MushafId; page
       {wide && info && <p className="muted center">{verseSpanLabel(info[1], info[2], surahs, lang)}</p>}
       {error && <p className="muted">{t("loadError")}</p>}
       {data && (
-        <div className={`spread ${turn ? `turn-${turn}` : ""}`} key={right} {...swipe} onAnimationEnd={() => setTurn(null)}>
+        <div className={`spread ${turn ? `turn-${turn}` : ""}`} key={right} {...swipe} onAnimationEnd={() => setTurn(null)} onClick={(e) => !wide && !(e.target as HTMLElement).closest("button") && setReading((r) => !r)}>
           {data.map((pd) => (
             <PageView
               key={pd.p}
               mushaf={mushaf}
               page={pd}
               surahs={surahs}
-              fill={!wide}
+              fill={wide ? false : reading ? "reading" : "chrome"}
               bookmark={
                 student
                   ? {

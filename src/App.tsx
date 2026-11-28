@@ -99,10 +99,13 @@ export function App() {
 
   return (
     <div className="app">
-      <header className="app-head">
-        <span className="brand">{t("appName")}</span>
-        <span className="who">{student.name}</span>
-      </header>
+      {/* В мусхафе заголовок не нужен: вся высота экрана отдана странице. */}
+      {tab !== "mushaf" && (
+        <header className="app-head">
+          <span className="brand">{t("appName")}</span>
+          <span className="who">{student.name}</span>
+        </header>
+      )}
       <main>
         {tab === "today" && <TodayScreen student={student} go={setNav} />}
         {tab === "mushaf" && <MushafScreen mushaf={student.mushaf} page={mushafPage} setPage={setMushafPage} />}

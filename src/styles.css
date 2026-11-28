@@ -1728,3 +1728,16 @@ button.link.inline {
   padding: 0;
   border-radius: 0;
 }
+
+/* Режим чтения мусхафа: кнопки сверху и нижнее меню спрятаны, страница на весь экран. */
+body.reading .tabs,
+body.reading .mushaf-nav,
+body.reading .study-open {
+  display: none;
+}
+body.reading .screen-mushaf {
+  padding-top: 0;
+}
+body.reading .app {
+  padding-bottom: env(safe-area-inset-bottom);
+}
