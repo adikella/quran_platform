@@ -82,6 +82,7 @@ export function SettingsScreen({ student, onAddStudent }: { student: Student; on
 
       <section className="card">
         <h3>{t("students")}</h3>
+        <p className="muted small-note">{t("studentsNote")}</p>
         <div className="choices col">
           {app.students.map((s) => (
             <button key={s.id} className={`choice ${s.id === student.id ? "on" : ""}`} onClick={() => setActive(s.id)}>
